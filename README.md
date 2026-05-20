@@ -62,18 +62,29 @@ Discord desktop client          (named pipe / Unix socket — OS-level)
 +----------------------------+
 ```
 
-When **Publish presence** is on, the extension:
+The card-level Switch in *Settings → Extensions* is the single on /
+off control. Enabling the extension starts the broadcast, disabling
+stops it. When the Switch flips on the extension:
 
 1. Picks the right helper binary for the current OS / arch (e.g.
    `sidecar/windows-x86_64/tedi-discord-helper.exe`).
-2. Spawns it via `shell_bg_spawn`. The helper binds
-   `127.0.0.1:0` (kernel-assigned ephemeral port), prints
-   `PORT=<n>` to stdout, then services HTTP.
-3. The extension polls `shell_bg_logs` for up to 5 s waiting for
-   `PORT=`. Once it has the port it `fetch()`'s `/connect`,
-   `/update`, `/disconnect` as needed.
-4. Toggle off / disable / uninstall → `POST /shutdown` (helper clears
-   activity, closes IPC, exits) then `shell_bg_kill` for safety.
+2. Spawns it via `shell_bg_spawn_direct`. Direct spawn means TEDI
+   tracks the helper PID itself (no `pwsh` / `bash` wrapper that
+   would leak the real child), so disabling the extension actually
+   kills the helper instead of a shell that already exited.
+3. Reads `PORT=<n>` from the helper's stdout via `shell_bg_logs`.
+4. `fetch()`s `/connect`, then `/update` on every workspace change.
+
+Disabling, uninstalling, or closing TEDI tears the helper down through
+three independent paths:
+
+- **Disable / uninstall** → the extension's `deactivate()` posts
+  `/shutdown` (the helper clears Discord activity and closes IPC) and
+  then calls `shell_bg_kill` for safety.
+- **TEDI crash / force-quit** → the helper's parent-PID watchdog
+  notices TEDI is gone within ~10 seconds and exits on its own.
+- **Long idle (4 h)** → the helper's idle timeout fires as a final
+  backstop in case both above paths somehow miss.
 
 The payload the helper sends to Discord:
 
@@ -99,10 +110,9 @@ Declared in `manifest.json`:
 
 ```json
 "permissions": [
-  "settings:read",
-  "settings:write",
   "ui:toast",
-  "invoke:shell_bg_spawn",
+  "statusbar:write",
+  "invoke:shell_bg_spawn_direct",
   "invoke:shell_bg_logs",
   "invoke:shell_bg_kill"
 ]
@@ -110,9 +120,9 @@ Declared in `manifest.json`:
 
 | Permission                          | What it lets the extension do                                  |
 | ----------------------------------- | -------------------------------------------------------------- |
-| `settings:read`, `settings:write`   | Persist the **Publish presence** toggle under `ext:tedi.discord-rich-presence:enabled` (namespaced; can't reach core settings). |
 | `ui:toast`                          | Surface failure modes (no binary for this platform, helper crashed, etc). |
-| `invoke:shell_bg_spawn`             | Start the bundled sidecar binary as a long-running background process. |
+| `statusbar:write`                   | Show the Discord icon in TEDI's bottom-right status bar (dim while connecting, full colour when connected). |
+| `invoke:shell_bg_spawn_direct`      | Start the bundled sidecar binary as a long-running background process. **Direct** = no shell wrapper, so the tracked PID is the helper itself and `shell_bg_kill` actually terminates it. |
 | `invoke:shell_bg_logs`              | Read the helper's stdout to discover the auto-assigned port. |
 | `invoke:shell_bg_kill`              | Stop the helper on disable / uninstall.                       |
 
@@ -170,9 +180,3 @@ zip -r dev.zip manifest.json extension.js logo.png sidecar
 The first install will spawn the helper, you should see `PORT=<n>` in
 TEDI's dev-tools console (`[ext:tedi.discord-rich-presence] sidecar
 port <n>`) and Discord should reflect your workspace within a second.
-
----
-
-## License
-
-[Apache-2.0](./LICENSE), IlhamriSKY.

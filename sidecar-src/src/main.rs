@@ -34,14 +34,20 @@ use discord_rich_presence::{
 use serde::Deserialize;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
 
-/// Self-terminate if no request lands within this window. Catches the
-/// "TEDI parent SIGKILL'd, helper orphaned" case without leaving a stray
-/// process on the user's machine for days. 4 h is generous: the
-/// extension fires a request whenever the workspace context changes, so
-/// any active TEDI session is well under this threshold.
+/// Self-terminate if no request lands within this window. Belt-and-
+/// suspenders backstop for the parent-PID watchdog below. 4 h is
+/// generous: the extension fires a request whenever the workspace
+/// context changes, so any active TEDI session is well under this
+/// threshold.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
-/// How often the receive loop wakes up to check the idle timer.
-const RECV_TICK: Duration = Duration::from_secs(60);
+/// How often the receive loop wakes up to check the idle + parent
+/// watchdog timers. Short enough that "TEDI just crashed" cleanup
+/// happens within a few seconds, long enough that we don't spin.
+const RECV_TICK: Duration = Duration::from_secs(2);
+/// How often the parent watchdog re-checks whether TEDI is still
+/// running. Tied to RECV_TICK below; if you bump RECV_TICK make sure
+/// this stays an integer multiple.
+const PARENT_CHECK_EVERY_TICKS: u32 = 5;
 
 const DISCORD_APP_ID: &str = "1506303762418110505";
 const LARGE_IMAGE_KEY: &str = "tedi_logo";
@@ -95,12 +101,23 @@ fn main() {
     use std::io::Write as _;
     let _ = std::io::stdout().flush();
 
+    // Snapshot the original parent PID at startup. On Unix the parent
+    // can be reparented to init when TEDI dies, so we can't rely on
+    // `getppid()` returning a fresh value later - we have to track the
+    // PID we saw at boot. On Windows we open a process handle via the
+    // PID and probe it with `WaitForSingleObject(0)`.
+    let parent_pid = current_parent_pid();
+    if let Some(pid) = parent_pid {
+        eprintln!("sidecar: parent pid {pid}");
+    }
+
     let state = State::new();
     let mut last_seen = Instant::now();
-    // Poll-based receive so we can run the idle check every minute.
-    // `incoming_requests()` is a blocking iterator that would block
-    // forever on a quiet client; that's exactly the orphan case we want
-    // to defuse.
+    let mut tick_count: u32 = 0;
+    // Poll-based receive so we can run the idle / parent-alive checks
+    // periodically. `incoming_requests()` is a blocking iterator that
+    // would block forever on a quiet client; that's exactly the orphan
+    // case we want to defuse.
     loop {
         match server.recv_timeout(RECV_TICK) {
             Ok(Some(mut request)) => {
@@ -153,6 +170,19 @@ fn main() {
                     let _ = disconnect(&state);
                     return;
                 }
+                // Parent-alive watchdog: if TEDI is gone (SIGKILL,
+                // crash, taskmgr force-end) we exit on our own so
+                // Discord doesn't keep showing a phantom presence.
+                tick_count = tick_count.wrapping_add(1);
+                if tick_count.is_multiple_of(PARENT_CHECK_EVERY_TICKS) {
+                    if let Some(pid) = parent_pid {
+                        if !is_process_alive(pid) {
+                            eprintln!("sidecar: parent {pid} gone, exiting");
+                            let _ = disconnect(&state);
+                            return;
+                        }
+                    }
+                }
             }
             Err(e) => {
                 eprintln!("sidecar: recv error, shutting down: {e}");
@@ -160,6 +190,124 @@ fn main() {
                 return;
             }
         }
+    }
+}
+
+// ============================== Parent watchdog ==============================
+//
+// Cross-platform "is the process that launched us still running?" check.
+// Used to disconnect Discord IPC the moment TEDI dies, even if it dies
+// in a way that doesn't get to run our `shell_bg_kill` cleanup (SIGKILL,
+// taskmgr, OS shutdown).
+
+#[cfg(unix)]
+fn current_parent_pid() -> Option<u32> {
+    // SAFETY: getppid is always safe; no preconditions.
+    let raw = unsafe { libc::getppid() };
+    if raw <= 1 {
+        // PID 1 (init / launchd) or 0 (orphaned at boot) means we have
+        // no meaningful "real parent" to watch.
+        return None;
+    }
+    Some(raw as u32)
+}
+
+#[cfg(unix)]
+fn is_process_alive(pid: u32) -> bool {
+    // `kill(pid, 0)` returns 0 on success, -1 with ESRCH when the
+    // process is gone. EPERM also means the process exists (we just
+    // lack permission to signal it). Only ESRCH proves the process
+    // is gone. Using `last_os_error()` keeps this portable across
+    // glibc / musl / macOS (libc::__errno_location is glibc-only).
+    let rc = unsafe { libc::kill(pid as i32, 0) };
+    if rc == 0 {
+        return true;
+    }
+    let errno = std::io::Error::last_os_error().raw_os_error().unwrap_or(0);
+    errno != libc::ESRCH
+}
+
+#[cfg(windows)]
+fn current_parent_pid() -> Option<u32> {
+    use std::mem::size_of;
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcessId;
+
+    // SAFETY: ToolHelp APIs operate on opaque handles that we close on
+    // every exit path. PROCESSENTRY32W is zero-initialised with the
+    // required `dwSize` field set, per MSDN.
+    unsafe {
+        let self_pid = GetCurrentProcessId();
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = if Process32FirstW(snap, &mut entry) != 0 {
+            true
+        } else {
+            CloseHandle(snap);
+            return None;
+        };
+        let mut parent: u32 = 0;
+        while found {
+            if entry.th32ProcessID == self_pid {
+                parent = entry.th32ParentProcessID;
+                break;
+            }
+            found = Process32NextW(snap, &mut entry) != 0;
+        }
+        CloseHandle(snap);
+        if parent == 0 {
+            None
+        } else {
+            Some(parent)
+        }
+    }
+}
+
+#[cfg(windows)]
+fn is_process_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SYNCHRONIZE,
+    };
+
+    // SAFETY: OpenProcess + WaitForSingleObject + GetExitCodeProcess
+    // are all safe given valid handles, which we close before return.
+    unsafe {
+        let handle = OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            0,
+            pid,
+        );
+        if handle.is_null() {
+            return false;
+        }
+        // Wait 0 ms: if the process has exited the wait returns
+        // immediately (WAIT_OBJECT_0). If still running we get
+        // WAIT_TIMEOUT.
+        let wait = WaitForSingleObject(handle, 0);
+        let alive = if wait == WAIT_TIMEOUT {
+            true
+        } else {
+            let mut code: u32 = 0;
+            // Belt-and-suspenders: a STILL_ACTIVE exit code means the
+            // wait raced and we should consider the process alive.
+            if GetExitCodeProcess(handle, &mut code) != 0 {
+                code as i32 == STILL_ACTIVE
+            } else {
+                false
+            }
+        };
+        CloseHandle(handle);
+        alive
     }
 }
 
