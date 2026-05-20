@@ -25,7 +25,7 @@
 //! commands behind this protocol.
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use discord_rich_presence::{
     activity::{Activity, Assets, Timestamps},
@@ -33,6 +33,15 @@ use discord_rich_presence::{
 };
 use serde::Deserialize;
 use tiny_http::{Method, Response, Server, StatusCode};
+
+/// Self-terminate if no request lands within this window. Catches the
+/// "TEDI parent SIGKILL'd, helper orphaned" case without leaving a stray
+/// process on the user's machine for days. 4 h is generous: the
+/// extension fires a request whenever the workspace context changes, so
+/// any active TEDI session is well under this threshold.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
+/// How often the receive loop wakes up to check the idle timer.
+const RECV_TICK: Duration = Duration::from_secs(60);
 
 const DISCORD_APP_ID: &str = "1506303762418110505";
 const LARGE_IMAGE_KEY: &str = "tedi_logo";
@@ -71,11 +80,13 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let port = server
-        .server_addr()
-        .to_ip()
-        .map(|sa| sa.port())
-        .unwrap_or(0);
+    let port = match server.server_addr().to_ip().map(|sa| sa.port()) {
+        Some(p) if p != 0 => p,
+        _ => {
+            eprintln!("sidecar: could not resolve bound TCP port");
+            std::process::exit(3);
+        }
+    };
 
     // Stdout protocol: the extension JS reads `PORT=<n>` from logs.
     // Flushing is important because shell_bg_spawn's ring buffer is
@@ -85,36 +96,58 @@ fn main() {
     let _ = std::io::stdout().flush();
 
     let state = State::new();
-    for mut request in server.incoming_requests() {
-        let response = match (request.method(), request.url()) {
-            (Method::Post, "/connect") => connect(&state),
-            (Method::Post, "/update") => {
-                let mut body = String::new();
-                if let Err(e) = request.as_reader().read_to_string(&mut body) {
-                    Err(format!("read body: {e}"))
-                } else {
-                    update(&state, &body)
+    let mut last_seen = Instant::now();
+    // Poll-based receive so we can run the idle check every minute.
+    // `incoming_requests()` is a blocking iterator that would block
+    // forever on a quiet client; that's exactly the orphan case we want
+    // to defuse.
+    loop {
+        match server.recv_timeout(RECV_TICK) {
+            Ok(Some(mut request)) => {
+                last_seen = Instant::now();
+                let response = match (request.method(), request.url()) {
+                    (Method::Post, "/connect") => connect(&state),
+                    (Method::Post, "/update") => {
+                        let mut body = String::new();
+                        if let Err(e) = request.as_reader().read_to_string(&mut body) {
+                            Err(format!("read body: {e}"))
+                        } else {
+                            update(&state, &body)
+                        }
+                    }
+                    (Method::Post, "/disconnect") => disconnect(&state),
+                    (Method::Post, "/shutdown") => {
+                        let _ = request.respond(Response::empty(StatusCode(200)));
+                        let _ = disconnect(&state);
+                        return;
+                    }
+                    (Method::Get, "/health") => Ok(String::from("ok")),
+                    _ => Err(format!(
+                        "unsupported {} {}",
+                        request.method(),
+                        request.url()
+                    )),
+                };
+                let (status, body) = match response {
+                    Ok(body) => (StatusCode(200), body),
+                    Err(message) => (StatusCode(500), format!("{{\"error\":{message:?}}}")),
+                };
+                let _ = request.respond(Response::from_string(body).with_status_code(status));
+            }
+            Ok(None) => {
+                // Idle tick. Exit if nobody has spoken to us for a while.
+                if last_seen.elapsed() >= IDLE_TIMEOUT {
+                    eprintln!("sidecar: idle for {:?}, exiting", IDLE_TIMEOUT);
+                    let _ = disconnect(&state);
+                    return;
                 }
             }
-            (Method::Post, "/disconnect") => disconnect(&state),
-            (Method::Post, "/shutdown") => {
-                let _ = request.respond(Response::empty(StatusCode(200)));
-                disconnect(&state).ok();
-                std::process::exit(0);
+            Err(e) => {
+                eprintln!("sidecar: recv error, shutting down: {e}");
+                let _ = disconnect(&state);
+                return;
             }
-            (Method::Get, "/health") => Ok(String::from("ok")),
-            _ => Err(format!(
-                "unsupported {} {}",
-                request.method(),
-                request.url()
-            )),
-        };
-
-        let (status, body) = match response {
-            Ok(body) => (StatusCode(200), body),
-            Err(message) => (StatusCode(500), format!("{{\"error\":{message:?}}}")),
-        };
-        let _ = request.respond(Response::from_string(body).with_status_code(status));
+        }
     }
 }
 

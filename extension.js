@@ -97,7 +97,31 @@ function buildPayload(c) {
 }
 
 async function spawnHelper() {
-  if (helperBgId !== null) return true;
+  if (helperBgId !== null) {
+    // The sidecar may have self-terminated (idle timeout, crash). Ask
+    // TEDI's shell-bg supervisor whether the process is still alive; if
+    // not, clear our cached handle so we respawn cleanly. Without this
+    // the JS layer would happily keep fetching a dead port.
+    try {
+      const logs = await ctx.invoke("shell_bg_logs", {
+        handle: helperBgId,
+        sinceOffset: 0,
+      });
+      if (logs && typeof logs === "object" && logs.exited) {
+        ctx.logger.info("sidecar exited; respawning", logs.exit_code ?? null);
+        helperBgId = null;
+        helperPort = null;
+        connected = false;
+      } else {
+        return true;
+      }
+    } catch (err) {
+      ctx.logger.warn("alive check failed; respawning", err);
+      helperBgId = null;
+      helperPort = null;
+      connected = false;
+    }
+  }
   const path = helperPathFor(ctx.installPath, ctx.os);
   if (!path) {
     ctx.ui.toast(
@@ -185,6 +209,13 @@ async function killHelper() {
   helperBgId = null;
   helperPort = null;
   connected = false;
+  // Drop the status icon whenever the connection is gone, for any
+  // reason (toggle off, disable, uninstall, helper crash).
+  try {
+    ctx.statusBar.removeItem("connected");
+  } catch {
+    // ctx may be null during very-early teardown - ignore.
+  }
 }
 
 async function ensureConnected() {
@@ -198,6 +229,14 @@ async function ensureConnected() {
       return false;
     }
     connected = true;
+    // Surface the connected state as a status-bar icon. Removed in
+    // teardown / killHelper so disable / uninstall is symmetric.
+    ctx.statusBar.setItem({
+      id: "connected",
+      icon: "logo.png",
+      tooltip: "Discord Rich Presence: connected",
+      tone: "success",
+    });
     return true;
   } catch (err) {
     ctx.logger.warn("connect fetch failed", err);
