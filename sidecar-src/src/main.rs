@@ -32,7 +32,7 @@ use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
 };
 use serde::Deserialize;
-use tiny_http::{Method, Response, Server, StatusCode};
+use tiny_http::{Header, Method, Response, Server, StatusCode};
 
 /// Self-terminate if no request lands within this window. Catches the
 /// "TEDI parent SIGKILL'd, helper orphaned" case without leaving a stray
@@ -105,6 +105,17 @@ fn main() {
         match server.recv_timeout(RECV_TICK) {
             Ok(Some(mut request)) => {
                 last_seen = Instant::now();
+
+                // CORS preflight: webview origin (e.g. http://localhost:1420
+                // in TEDI dev mode, or tauri://localhost in production)
+                // differs from our http://127.0.0.1:<port> sidecar origin,
+                // so the browser fires an OPTIONS preflight on every
+                // POST. Answer it before the method dispatch.
+                if request.method() == &Method::Options {
+                    let _ = request.respond(with_cors(Response::empty(StatusCode(204))));
+                    continue;
+                }
+
                 let response = match (request.method(), request.url()) {
                     (Method::Post, "/connect") => connect(&state),
                     (Method::Post, "/update") => {
@@ -117,7 +128,7 @@ fn main() {
                     }
                     (Method::Post, "/disconnect") => disconnect(&state),
                     (Method::Post, "/shutdown") => {
-                        let _ = request.respond(Response::empty(StatusCode(200)));
+                        let _ = request.respond(with_cors(Response::empty(StatusCode(200))));
                         let _ = disconnect(&state);
                         return;
                     }
@@ -132,7 +143,8 @@ fn main() {
                     Ok(body) => (StatusCode(200), body),
                     Err(message) => (StatusCode(500), format!("{{\"error\":{message:?}}}")),
                 };
-                let _ = request.respond(Response::from_string(body).with_status_code(status));
+                let resp = Response::from_string(body).with_status_code(status);
+                let _ = request.respond(with_cors(resp));
             }
             Ok(None) => {
                 // Idle tick. Exit if nobody has spoken to us for a while.
@@ -149,6 +161,24 @@ fn main() {
             }
         }
     }
+}
+
+/// Stamp every outbound response with CORS headers permissive enough to
+/// satisfy any TEDI webview origin (`http://localhost:1420` in dev,
+/// `tauri://localhost` / `http://tauri.localhost` in production). The
+/// server is bound to 127.0.0.1 only - no remote host can reach it -
+/// so the wildcard is fine and avoids hard-coding an origin string
+/// that changes between TEDI builds.
+fn with_cors<R>(resp: Response<R>) -> Response<R>
+where
+    R: std::io::Read,
+{
+    resp.with_header(Header::from_bytes(b"Access-Control-Allow-Origin", b"*").unwrap())
+        .with_header(
+            Header::from_bytes(b"Access-Control-Allow-Methods", b"GET, POST, OPTIONS").unwrap(),
+        )
+        .with_header(Header::from_bytes(b"Access-Control-Allow-Headers", b"Content-Type").unwrap())
+        .with_header(Header::from_bytes(b"Access-Control-Max-Age", b"86400").unwrap())
 }
 
 fn unpoison<'a, T>(
