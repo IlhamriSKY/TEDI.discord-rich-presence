@@ -150,33 +150,8 @@ zip -j tedi.discord-rich-presence-dev.zip manifest.json extension.js logo.png
 # In TEDI: Settings -> Extensions -> From file -> select the .zip
 ```
 
-### Releasing
-
-1. Bump `manifest.json` `"version"` (semver).
-2. `git tag vX.Y.Z && git push --tags`.
-3. The [release workflow](.github/workflows/release.yml) checks that
-   `manifest.json` version matches the tag, packages the three files
-   into `tedi.discord-rich-presence-X.Y.Z.zip`, and uploads it as a
-   GitHub release asset.
-4. Every TEDI user running **Check updates** picks up the new release
-   the moment it lands.
-
----
-
-## File layout
-
-```
-.
-├── manifest.json                     extension metadata, permissions, contributes.settings
-├── extension.js                      activate(ctx) / deactivate() entry
-├── logo.png                          icon (128x128 recommended; this one is 1.2 MB and works fine)
-├── README.md                         this file
-├── LICENSE
-└── .github/workflows/release.yml     tag-triggered release pipeline
-```
-
 ---
 
 ## License
 
-[MIT](./LICENSE), IlhamriSKY.
+[Apache-2.0](./LICENSE), IlhamriSKY.
