@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Discord">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Discord">
   <!--
-    Official Discord "Clyde" mark inside the Discord blurple square
-    background. The path is the publicly-published Discord wordmark
-    glyph, rendered white-on-blurple for use as a small status-bar
-    indicator. See https://discord.com/branding for the official
-    brand assets.
+    Outline Clyde silhouette, matched to the project's Hugeicons stroke
+    style (1.75 stroke, rounded caps/joins, `currentColor`). No filled
+    body, no frame - just the mark itself. Eyes are filled to read as
+    dots at 16 px without losing legibility.
   -->
-  <rect width="32" height="32" rx="7" fill="#5865F2"/>
-  <path fill="#fff" d="M22.96 10.79a16.7 16.7 0 0 0-4.13-1.28.06.06 0 0 0-.07.03c-.18.32-.38.74-.51 1.07a15.46 15.46 0 0 0-4.65 0 10.7 10.7 0 0 0-.52-1.07.06.06 0 0 0-.07-.03 16.7 16.7 0 0 0-4.13 1.28.05.05 0 0 0-.03.02C5.41 14.7 4.69 18.49 5.05 22.24c0 .02.01.04.03.05a16.83 16.83 0 0 0 5.06 2.56c.03.01.06 0 .08-.02.39-.53.74-1.09 1.04-1.68a.06.06 0 0 0-.03-.08 11 11 0 0 1-1.58-.75.06.06 0 0 1-.01-.1c.11-.08.21-.16.32-.24a.06.06 0 0 1 .06 0 12.07 12.07 0 0 0 10.24 0 .06.06 0 0 1 .06 0c.1.08.21.16.32.24.04.03.04.09-.01.1-.5.3-1.04.55-1.58.75a.06.06 0 0 0-.04.08c.32.59.67 1.15 1.05 1.68.02.02.05.03.08.02a16.78 16.78 0 0 0 5.06-2.56.06.06 0 0 0 .03-.05c.42-4.34-.7-8.1-2.97-11.43a.04.04 0 0 0-.02-.02ZM12.4 19.96c-1 0-1.82-.92-1.82-2.04 0-1.13.81-2.04 1.82-2.04 1.01 0 1.83.92 1.82 2.04 0 1.12-.81 2.04-1.82 2.04Zm6.7 0c-1 0-1.82-.92-1.82-2.04 0-1.13.81-2.04 1.82-2.04 1.01 0 1.83.92 1.82 2.04 0 1.12-.81 2.04-1.82 2.04Z"/>
+  <path d="M18.86 5.4a16 16 0 0 0-4.04-1.28.06.06 0 0 0-.07.03c-.18.3-.37.7-.5 1a15.3 15.3 0 0 0-4.5 0c-.13-.3-.33-.7-.5-1a.06.06 0 0 0-.07-.03 16 16 0 0 0-4.04 1.28.06.06 0 0 0-.04.03C2.52 9.22 1.82 12.92 2.16 16.56c0 .02.01.04.03.05a16.13 16.13 0 0 0 4.84 2.42.06.06 0 0 0 .08-.02c.37-.5.7-1.04 1-1.6a.06.06 0 0 0-.03-.08 10.6 10.6 0 0 1-1.5-.7.06.06 0 0 1 0-.1c.1-.07.2-.15.3-.23a.06.06 0 0 1 .06 0 11.5 11.5 0 0 0 9.74 0 .06.06 0 0 1 .06 0c.1.08.2.16.3.23a.06.06 0 0 1 0 .1 10 10 0 0 1-1.5.7.06.06 0 0 0-.03.08c.3.56.63 1.1 1 1.6a.06.06 0 0 0 .08.02 16.1 16.1 0 0 0 4.85-2.42.06.06 0 0 0 .03-.05c.4-4.2-.67-7.87-2.94-11.13a.05.05 0 0 0-.03-.03Z"/>
+  <ellipse cx="9" cy="13" rx="1.25" ry="1.65" fill="currentColor" stroke="none"/>
+  <ellipse cx="15" cy="13" rx="1.25" ry="1.65" fill="currentColor" stroke="none"/>
 </svg>
