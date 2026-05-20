@@ -1,0 +1,73 @@
+name: Release
+
+# Tag-triggered release: pushing `vX.Y.Z` creates a GitHub release with the
+# extension packaged as `tedi.discord-rich-presence-X.Y.Z.zip`. TEDI's
+# "Install from GitHub" picks the `.zip` asset off `releases/latest`, and
+# its "Check updates" button reads `tag_name` from the same endpoint - so
+# this single workflow covers both the install and the update flow.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v1.0.0). Required when running manually."
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          # Strip optional leading v so the version matches what
+          # manifest.json carries (semver-ish, no prefix).
+          version="${tag#v}"
+          echo "tag=$tag"      >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Verify manifest.json version matches the tag
+        run: |
+          set -euo pipefail
+          mver=$(jq -r '.version' manifest.json)
+          if [ "$mver" != "${{ steps.ver.outputs.version }}" ]; then
+            echo "::error::manifest.json version ($mver) does not match tag (${{ steps.ver.outputs.version }})"
+            exit 1
+          fi
+          echo "manifest.json version OK: $mver"
+
+      - name: Package extension
+        id: pkg
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          out="dist/tedi.discord-rich-presence-${{ steps.ver.outputs.version }}.zip"
+          # Only the files the runtime needs - keep the asset small so
+          # TEDI's HTTP cap (50 MiB) is never close to tripping.
+          zip -j "$out" manifest.json extension.js logo.png
+          # Sanity: list contents in the job log for auditability.
+          unzip -l "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Create / update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          generate_release_notes: true
+          files: ${{ steps.pkg.outputs.path }}

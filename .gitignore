@@ -1,0 +1,9 @@
+# Local build output produced by the CI workflow; never committed.
+dist/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
