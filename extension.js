@@ -52,6 +52,11 @@ function platformDir(os) {
 }
 
 function helperPathFor(installPath, os) {
+  // Defensive: older TEDI builds may not expose `installPath` / `os`
+  // on the context. Don't tank the whole activate flow - just refuse
+  // to spawn and tell the user.
+  if (typeof installPath !== "string" || !installPath) return null;
+  if (!os || typeof os.platform !== "string") return null;
   const dir = platformDir(os);
   if (!dir) return null;
   const exe = os.platform === "windows" ? "tedi-discord-helper.exe" : "tedi-discord-helper";
@@ -97,6 +102,16 @@ function buildPayload(c) {
 }
 
 async function spawnHelper() {
+  // Defensive against TEDI builds that pre-date ctx.installPath / ctx.os
+  // / ctx.statusBar. We surface a clear toast instead of throwing the
+  // whole activate flow.
+  if (!ctx.installPath || !ctx.os) {
+    ctx.ui.toast(
+      "Discord Rich Presence requires a newer build of TEDI (with extension OS / installPath APIs).",
+      { variant: "warning" },
+    );
+    return false;
+  }
   if (helperBgId !== null) {
     // The sidecar may have self-terminated (idle timeout, crash). Ask
     // TEDI's shell-bg supervisor whether the process is still alive; if
@@ -211,10 +226,31 @@ async function killHelper() {
   connected = false;
   // Drop the status icon whenever the connection is gone, for any
   // reason (toggle off, disable, uninstall, helper crash).
+  safeStatusBarRemove("connected");
+}
+
+/** Status-bar helpers are guarded because older TEDI builds may not
+ *  expose `ctx.statusBar` (added in 0.2.7-ish). Without the guard the
+ *  whole activate flow would throw on a fresh connect and the user
+ *  would lose the in-card toggle. The Discord lifecycle still works
+ *  without an icon. */
+function safeStatusBarSet(item) {
   try {
-    ctx.statusBar.removeItem("connected");
-  } catch {
-    // ctx may be null during very-early teardown - ignore.
+    if (ctx && ctx.statusBar && typeof ctx.statusBar.setItem === "function") {
+      ctx.statusBar.setItem(item);
+    }
+  } catch (err) {
+    ctx?.logger?.warn?.("statusBar.setItem failed (older TEDI?)", err);
+  }
+}
+
+function safeStatusBarRemove(id) {
+  try {
+    if (ctx && ctx.statusBar && typeof ctx.statusBar.removeItem === "function") {
+      ctx.statusBar.removeItem(id);
+    }
+  } catch (err) {
+    ctx?.logger?.warn?.("statusBar.removeItem failed (older TEDI?)", err);
   }
 }
 
@@ -229,9 +265,7 @@ async function ensureConnected() {
       return false;
     }
     connected = true;
-    // Surface the connected state as a status-bar icon. Removed in
-    // teardown / killHelper so disable / uninstall is symmetric.
-    ctx.statusBar.setItem({
+    safeStatusBarSet({
       id: "connected",
       icon: "logo.png",
       tooltip: "Discord Rich Presence: connected",
@@ -330,33 +364,62 @@ function refresh() {
 export async function activate(context) {
   ctx = context;
 
-  ctx.contribute.settings([
-    {
-      id: "enabled",
-      type: "boolean",
-      label: "Publish presence",
-      description:
-        "Spawn the bundled Discord IPC helper and start broadcasting your activity. Toggle off to disconnect and stop the helper process.",
-      default: false,
-    },
-  ]);
+  // 1. The declarative contribution comes first so the in-card toggle
+  //    shows up unconditionally - even if a later step throws on an
+  //    older TEDI build, the user can still disable / uninstall.
+  try {
+    ctx.contribute.settings([
+      {
+        id: "enabled",
+        type: "boolean",
+        label: "Publish presence",
+        description:
+          "Spawn the bundled Discord IPC helper and start broadcasting your activity. Toggle off to disconnect and stop the helper process.",
+        default: false,
+      },
+    ]);
+  } catch (err) {
+    ctx.logger?.error?.("contribute.settings failed", err);
+  }
 
-  const initial = await ctx.settings.get("enabled");
-  enabled = Boolean(initial);
+  // 2. Best-effort initial read; default to off if the bridge isn't there.
+  try {
+    const initial = await ctx.settings.get("enabled");
+    enabled = Boolean(initial);
+  } catch (err) {
+    ctx.logger?.warn?.("settings.get failed", err);
+    enabled = false;
+  }
 
-  ctx.settings.onChange("enabled", (value) => {
-    const next = Boolean(value);
-    if (next === enabled) return;
-    enabled = next;
-    refresh();
-  });
+  // 3. Subscribe to flips. If the settings bridge is missing, the
+  //    extension simply won't react to the toggle - logged + no throw.
+  try {
+    ctx.settings.onChange("enabled", (value) => {
+      const next = Boolean(value);
+      if (next === enabled) return;
+      enabled = next;
+      refresh();
+    });
+  } catch (err) {
+    ctx.logger?.warn?.("settings.onChange unavailable", err);
+  }
 
-  ctx.app.onContextChange((next) => {
-    lastContext = next;
-    if (enabled) {
-      schedulePush(buildPayload(next));
+  // 4. Live workspace snapshots. Older builds don't ship `ctx.app`;
+  //    we just skip and use a static "Idle" payload.
+  try {
+    if (ctx.app && typeof ctx.app.onContextChange === "function") {
+      ctx.app.onContextChange((next) => {
+        lastContext = next;
+        if (enabled) {
+          schedulePush(buildPayload(next));
+        }
+      });
+    } else {
+      ctx.logger?.warn?.("ctx.app missing; presence will use static payload");
     }
-  });
+  } catch (err) {
+    ctx.logger?.warn?.("ctx.app.onContextChange failed", err);
+  }
 
   refresh();
 }
