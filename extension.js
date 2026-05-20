@@ -1,53 +1,73 @@
-// Discord Rich Presence extension - reference implementation.
+// Discord Rich Presence extension - sidecar architecture.
 //
-// Demonstrates the v1 extension API:
-//   - `contribute.settings([...])` declares a toggle that auto-renders in
-//     Settings - Extensions.
-//   - `settings.onChange("enabled", ...)` reacts to the user flipping it.
-//   - `app.onContextChange(...)` receives live workspace/file/terminal
-//     state pushed by the App.
-//   - `invoke()` is permission-gated against the manifest's
-//     `invoke:discord_rpc_*` entries.
+// The TEDI binary itself has no Discord-specific code. This extension
+// ships a small native helper (`sidecar/<platform>-<arch>/tedi-discord-helper`)
+// that owns the Discord IPC connection. The extension JS layer:
 //
-// State machine: idle - connecting - connected - retrying. The retry loop
-// is the same as the inlined hook had pre-port: 15s back-off so a closed
-// Discord client doesn't get hammered every workspace switch.
+//   1. picks the binary for the current OS / arch from `ctx.os`
+//   2. spawns it via `shell_bg_spawn` (long-running bg process)
+//   3. reads its stdout via `shell_bg_logs` to learn the localhost port
+//      the helper bound to
+//   4. talks to it over plain HTTP on 127.0.0.1
 //
-// Plug-and-play caveat: core TEDI does NOT ship `discord_rpc_*` Tauri
-// commands - the codebase intentionally has no Discord ties (see
-// extensions/README.md). If those commands aren't found at runtime the
-// extension switches into "backend unavailable" mode: install, toggle,
-// disable, and uninstall stay safe; we just don't publish to Discord.
+// The sidecar lifecycle is bound to the "Publish presence" toggle: on
+// flips spawn it, off flips POST /shutdown + kill the process. Disable
+// or uninstall does the same teardown via `deactivate()`.
 
+const READ_PORT_TIMEOUT_MS = 5000;
+const READ_PORT_POLL_MS = 100;
 const RETRY_DELAY_MS = 15_000;
-const BACKEND_MISSING_HINTS = [
-  "not found",
-  "not allowed",
-  "permissiondenied",
-  "permission denied",
-  "command discord_rpc",
-];
 
-/** @type {import("@/modules/extensions/host").ExtensionContext | null} */
 let ctx = null;
 let enabled = false;
-let connected = false;
-/** Latest payload waiting to be pushed (newer wins). */
+/** Background process id returned by `shell_bg_spawn`. */
+let helperBgId = null;
+/** localhost port the helper is listening on. */
+let helperPort = null;
+/** Most recently requested payload (newer wins). */
 let pendingPayload = null;
-let retryTimer = null;
+let connected = false;
 let draining = false;
+let retryTimer = null;
 /** Bumped on every teardown so an in-flight retry knows to bail. */
 let sessionGen = 0;
 let lastContext = { workspaceCwd: null, activeFileName: null, terminalCount: 0 };
-/** Latched once we discover the Rust `discord_rpc_*` commands aren't
- *  registered in this build of TEDI. Stops the 15s retry loop from
- *  hammering a missing command indefinitely. Cleared on extension
- *  reload (a fresh `activate` call gets a fresh module instance). */
-let backendUnavailable = false;
 
-function looksLikeMissingBackend(err) {
-  const msg = String(err ?? "").toLowerCase();
-  return BACKEND_MISSING_HINTS.some((hint) => msg.includes(hint));
+function platformDir(os) {
+  // CI builds the sidecar under sidecar/<platform>-<arch>/ to keep the
+  // naming aligned with `rustc` triples. The shorthand here matches
+  // what `.github/workflows/release.yml` produces.
+  const platform = os.platform;
+  const arch = os.arch;
+  if (platform === "windows") {
+    return arch === "aarch64" ? "windows-aarch64" : "windows-x86_64";
+  }
+  if (platform === "macos") {
+    return arch === "aarch64" ? "macos-aarch64" : "macos-x86_64";
+  }
+  if (platform === "linux") {
+    return arch === "aarch64" ? "linux-aarch64" : "linux-x86_64";
+  }
+  return null;
+}
+
+function helperPathFor(installPath, os) {
+  const dir = platformDir(os);
+  if (!dir) return null;
+  const exe = os.platform === "windows" ? "tedi-discord-helper.exe" : "tedi-discord-helper";
+  return `${installPath.replace(/\\/g, "/")}/sidecar/${dir}/${exe}`;
+}
+
+/**
+ * Build the shell command string `shell_bg_spawn` expects. TEDI wraps
+ * the input with `pwsh -NoProfile -Command` on Windows and `$SHELL -lc`
+ * on Unix, so we have to quote the path defensively for the host
+ * shell. PowerShell needs the `&` call operator before a quoted path;
+ * POSIX shells just need the path single-quoted.
+ */
+function spawnCommandFor(path, os) {
+  const escaped = path.replace(/'/g, "''");
+  return os.platform === "windows" ? `& '${escaped}'` : `'${escaped}'`;
 }
 
 function clearRetry() {
@@ -76,52 +96,137 @@ function buildPayload(c) {
   return { details, state };
 }
 
+async function spawnHelper() {
+  if (helperBgId !== null) return true;
+  const path = helperPathFor(ctx.installPath, ctx.os);
+  if (!path) {
+    ctx.ui.toast(
+      `Discord Rich Presence: no sidecar binary for ${ctx.os.platform}/${ctx.os.arch} in this release.`,
+      { variant: "warning" },
+    );
+    return false;
+  }
+  try {
+    // shell_bg_spawn returns the handle (u32) directly. The command is
+    // run through the host shell, so we need to quote the binary path
+    // for the host platform.
+    helperBgId = await ctx.invoke("shell_bg_spawn", {
+      command: spawnCommandFor(path, ctx.os),
+      cwd: null,
+    });
+    ctx.logger.info("sidecar spawned", { handle: helperBgId, path });
+  } catch (err) {
+    ctx.ui.toast(
+      `Discord Rich Presence: could not start the sidecar (${err}).`,
+      { variant: "error" },
+    );
+    ctx.logger.error("spawn failed", err);
+    return false;
+  }
+  // Bounded poll for `PORT=<n>` on the helper's stdout. A misbehaving
+  // helper that never prints would otherwise hang the extension; the
+  // 5 s budget is intentionally short.
+  const deadline = Date.now() + READ_PORT_TIMEOUT_MS;
+  let logOffset = 0;
+  while (Date.now() < deadline) {
+    try {
+      const logs = await ctx.invoke("shell_bg_logs", {
+        handle: helperBgId,
+        sinceOffset: logOffset,
+      });
+      const bytes = logs && typeof logs === "object" ? (logs.bytes ?? "") : String(logs ?? "");
+      if (typeof logs === "object" && logs && typeof logs.next_offset === "number") {
+        logOffset = logs.next_offset;
+      }
+      const match = String(bytes).match(/^PORT=(\d+)/m);
+      if (match) {
+        helperPort = Number(match[1]);
+        ctx.logger.info("sidecar port", helperPort);
+        return true;
+      }
+      // Bail early if the helper already exited (e.g. bind error).
+      if (logs && typeof logs === "object" && logs.exited) {
+        ctx.logger.error("sidecar exited before announcing port", logs);
+        break;
+      }
+    } catch (err) {
+      ctx.logger.warn("shell_bg_logs read failed", err);
+    }
+    await sleep(READ_PORT_POLL_MS);
+  }
+  ctx.ui.toast(
+    "Discord Rich Presence: sidecar did not announce a port within 5 s. Aborting.",
+    { variant: "error" },
+  );
+  await killHelper();
+  return false;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function killHelper() {
+  if (helperBgId !== null) {
+    try {
+      // Give the helper a chance to clear its Discord activity first.
+      if (helperPort !== null) {
+        try {
+          await fetch(`http://127.0.0.1:${helperPort}/shutdown`, { method: "POST" });
+        } catch {
+          // best-effort
+        }
+      }
+      await ctx.invoke("shell_bg_kill", { handle: helperBgId });
+    } catch (err) {
+      ctx.logger.warn("shell_bg_kill failed", err);
+    }
+  }
+  helperBgId = null;
+  helperPort = null;
+  connected = false;
+}
+
 async function ensureConnected() {
   if (connected) return true;
-  if (backendUnavailable) return false;
+  if (!(await spawnHelper())) return false;
   try {
-    await ctx.invoke("discord_rpc_connect");
+    const resp = await fetch(`http://127.0.0.1:${helperPort}/connect`, { method: "POST" });
+    if (!resp.ok) {
+      const body = await resp.text();
+      ctx.logger.warn("connect failed", resp.status, body);
+      return false;
+    }
     connected = true;
     return true;
   } catch (err) {
-    if (looksLikeMissingBackend(err)) {
-      backendUnavailable = true;
-      ctx.logger.warn(
-        "discord_rpc_* commands not registered in this TEDI build; presence is a no-op",
-        err,
-      );
-      ctx.ui.toast(
-        "Discord backend not available in this build of TEDI. The extension installed cleanly but won't publish presence.",
-        { variant: "warning" },
-      );
-    } else {
-      ctx.logger.warn("discord connect failed", err);
-    }
+    ctx.logger.warn("connect fetch failed", err);
     return false;
   }
 }
 
 async function sendUpdate(payload) {
+  if (helperPort === null) return false;
   try {
-    await ctx.invoke("discord_rpc_update", { payload });
-    return true;
-  } catch (err) {
-    if (looksLikeMissingBackend(err)) {
-      backendUnavailable = true;
+    const resp = await fetch(`http://127.0.0.1:${helperPort}/update`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      ctx.logger.warn("update failed", resp.status, await resp.text());
       connected = false;
-      ctx.logger.warn(
-        "discord_rpc_update missing; presence will stay idle until next reload",
-        err,
-      );
+      try {
+        await fetch(`http://127.0.0.1:${helperPort}/disconnect`, { method: "POST" });
+      } catch {
+        // best-effort
+      }
       return false;
     }
-    ctx.logger.warn("discord update failed - dropping client", err);
+    return true;
+  } catch (err) {
+    ctx.logger.warn("update fetch failed", err);
     connected = false;
-    try {
-      await ctx.invoke("discord_rpc_disconnect");
-    } catch {
-      /* best-effort */
-    }
     return false;
   }
 }
@@ -145,24 +250,12 @@ async function drain() {
       pendingPayload = null;
       const ok = await ensureConnected();
       if (myGen !== sessionGen) return;
-      // Permanent failure (no Rust backend) - drop the queue silently so
-      // we don't keep firing retries every 15s for nothing.
-      if (backendUnavailable) {
-        pendingPayload = null;
-        clearRetry();
-        return;
-      }
       if (!ok) {
         scheduleRetry(next);
         return;
       }
       const sent = await sendUpdate(next);
       if (myGen !== sessionGen) return;
-      if (backendUnavailable) {
-        pendingPayload = null;
-        clearRetry();
-        return;
-      }
       if (!sent) {
         scheduleRetry(next);
         return;
@@ -180,22 +273,11 @@ function schedulePush(payload) {
 }
 
 async function teardown() {
-  // Bumping the gen first means any in-flight drain still inside an
-  // `await` will short-circuit on its next gen check. Without this,
-  // disable/uninstall could race a pending invoke and accidentally
-  // reconnect after we've torn down.
+  // Bump first so any in-flight retry / drain bails out.
   sessionGen += 1;
   clearRetry();
   pendingPayload = null;
-  if (connected) {
-    connected = false;
-    try {
-      await ctx.invoke("discord_rpc_disconnect");
-    } catch {
-      // best-effort - if the backend is gone (uninstall / disabled) or
-      // Discord crashed, there's nothing to disconnect from.
-    }
-  }
+  await killHelper();
 }
 
 function refresh() {
@@ -209,15 +291,13 @@ function refresh() {
 export async function activate(context) {
   ctx = context;
 
-  // Declare the user-facing toggle. Auto-rendered under this extension's
-  // card in Settings - Extensions.
   ctx.contribute.settings([
     {
       id: "enabled",
       type: "boolean",
       label: "Publish presence",
       description:
-        "Connect to the Discord desktop app and start broadcasting your activity. Toggle off to disconnect.",
+        "Spawn the bundled Discord IPC helper and start broadcasting your activity. Toggle off to disconnect and stop the helper process.",
       default: false,
     },
   ]);

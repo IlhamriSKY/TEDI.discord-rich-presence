@@ -1,0 +1,29 @@
+[package]
+name = "tedi-discord-helper"
+version = "1.0.0"
+edition = "2021"
+description = "Sidecar IPC helper for the tedi.discord-rich-presence extension"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "tedi-discord-helper"
+path = "src/main.rs"
+
+[dependencies]
+# Discord Rich Presence over OS-level IPC. Native dep that the
+# extension webview can't reach directly - the whole reason this
+# sidecar exists.
+discord-rich-presence = "0.2"
+# Minimal blocking HTTP/1.1 server. Two endpoints, JSON in/out, no need
+# for tokio/hyper.
+tiny_http = { version = "0.12", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

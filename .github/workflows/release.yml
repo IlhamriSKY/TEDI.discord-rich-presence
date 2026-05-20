@@ -1,10 +1,12 @@
 name: Release
 
-# Tag-triggered release: pushing `vX.Y.Z` creates a GitHub release with the
-# extension packaged as `tedi.discord-rich-presence-X.Y.Z.zip`. TEDI's
-# "Install from GitHub" picks the `.zip` asset off `releases/latest`, and
-# its "Check updates" button reads `tag_name` from the same endpoint - so
-# this single workflow covers both the install and the update flow.
+# Tag-triggered release. Each `vX.Y.Z` push:
+#   1. spins up windows / macos / linux runners (and arm64 cross-target)
+#   2. builds the `tedi-discord-helper` sidecar per (target_os, target_arch)
+#   3. collects every binary into `sidecar/<platform>-<arch>/` next to
+#      manifest.json + extension.js + logo.png
+#   4. zips the whole tree, uploads to the GitHub release that TEDI's
+#      installer reads from `releases/latest`.
 
 on:
   push:
@@ -20,14 +22,80 @@ permissions:
   contents: write
 
 jobs:
+  build-sidecar:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            sidecar_dir: windows-x86_64
+            exe_suffix: .exe
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            sidecar_dir: macos-x86_64
+            exe_suffix: ""
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            sidecar_dir: macos-aarch64
+            exe_suffix: ""
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            sidecar_dir: linux-x86_64
+            exe_suffix: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (${{ matrix.target }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo registry / target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            sidecar-src/target
+          key: sidecar-${{ matrix.target }}-${{ hashFiles('sidecar-src/Cargo.lock', 'sidecar-src/Cargo.toml') }}
+
+      - name: Build sidecar (release)
+        working-directory: sidecar-src
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Stage binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p stage/${{ matrix.sidecar_dir }}
+          src="sidecar-src/target/${{ matrix.target }}/release/tedi-discord-helper${{ matrix.exe_suffix }}"
+          dst="stage/${{ matrix.sidecar_dir }}/tedi-discord-helper${{ matrix.exe_suffix }}"
+          cp "$src" "$dst"
+          ls -la stage/${{ matrix.sidecar_dir }}
+
+      - name: Upload sidecar artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sidecar-${{ matrix.sidecar_dir }}
+          path: stage/${{ matrix.sidecar_dir }}
+          if-no-files-found: error
+
   release:
+    name: Package + release
     runs-on: ubuntu-latest
+    needs: build-sidecar
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Resolve version
         id: ver
+        shell: bash
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -35,10 +103,8 @@ jobs:
           else
             tag="${GITHUB_REF#refs/tags/}"
           fi
-          # Strip optional leading v so the version matches what
-          # manifest.json carries (semver-ish, no prefix).
           version="${tag#v}"
-          echo "tag=$tag"      >> "$GITHUB_OUTPUT"
+          echo "tag=$tag"         >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Verify manifest.json version matches the tag
@@ -49,18 +115,42 @@ jobs:
             echo "::error::manifest.json version ($mver) does not match tag (${{ steps.ver.outputs.version }})"
             exit 1
           fi
-          echo "manifest.json version OK: $mver"
+
+      - name: Download every sidecar artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: sidecar
+          pattern: sidecar-*
+          merge-multiple: false
+
+      - name: Flatten sidecar layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          # actions/download-artifact creates sidecar/sidecar-<id>/<file>;
+          # we want sidecar/<id>/<file>. Move and clean up.
+          shopt -s nullglob
+          for dir in sidecar/sidecar-*; do
+            name="${dir#sidecar/sidecar-}"
+            mv "$dir" "sidecar/$name"
+          done
+          ls -R sidecar
 
       - name: Package extension
         id: pkg
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
           out="dist/tedi.discord-rich-presence-${{ steps.ver.outputs.version }}.zip"
-          # Only the files the runtime needs - keep the asset small so
-          # TEDI's HTTP cap (50 MiB) is never close to tripping.
-          zip -j "$out" manifest.json extension.js logo.png
-          # Sanity: list contents in the job log for auditability.
+          # Only ship runtime files: manifest + JS + icon + sidecar tree.
+          # The Rust source (sidecar-src/) stays in the repo but never in
+          # the release asset.
+          zip -r "$out" \
+            manifest.json \
+            extension.js \
+            logo.png \
+            sidecar
           unzip -l "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 

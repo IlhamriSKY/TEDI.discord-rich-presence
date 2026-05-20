@@ -1,19 +1,19 @@
 {
   "id": "tedi.discord-rich-presence",
   "name": "Discord Rich Presence",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Share what you're working on as a Discord status (workspace folder, active file, open terminals, elapsed time). Requires the Discord desktop app to be running.",
   "author": "IlhamRiski - ilhamriski.com",
-  "homepage": "https://github.com/IlhamriSKY/TEDI.discord-rich-presence",
+  "homepage": "https://github.com/IlhamriSKY/EDI.discord-rich-presence",
   "icon": "logo.png",
   "main": "extension.js",
   "permissions": [
-    "invoke:discord_rpc_connect",
-    "invoke:discord_rpc_update",
-    "invoke:discord_rpc_disconnect",
     "settings:read",
     "settings:write",
-    "ui:toast"
+    "ui:toast",
+    "invoke:shell_bg_spawn",
+    "invoke:shell_bg_logs",
+    "invoke:shell_bg_kill"
   ],
   "contributes": {
     "settings": [
@@ -21,7 +21,7 @@
         "id": "enabled",
         "type": "boolean",
         "label": "Publish presence",
-        "description": "Connect to the Discord desktop app and start broadcasting your activity. Toggle off to disconnect.",
+        "description": "Spawn the bundled Discord IPC helper and start broadcasting your activity. Toggle off to disconnect and stop the helper process.",
         "default": false
       }
     ]

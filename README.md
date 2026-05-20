@@ -8,12 +8,11 @@ publishes your current workspace as a Discord Rich Presence status.
 </p>
 
 > [!NOTE]
-> This extension depends on Discord IPC Tauri commands
-> (`discord_rpc_connect`, `discord_rpc_update`, `discord_rpc_disconnect`).
-> The mainline TEDI binary does not ship those commands; see the
-> [Backend caveat](#backend-caveat) below. The extension still installs,
-> configures, and uninstalls cleanly without them. It simply won't
-> publish to Discord until the backend exists.
+> The extension ships its own native sidecar binary, so the TEDI core
+> binary stays free of any Discord-specific code. The first time it
+> runs on Windows you'll see a SmartScreen prompt and on macOS a
+> Gatekeeper warning; both are expected for an unsigned helper. See
+> [Trust prompts](#trust-prompts) below.
 
 ---
 
@@ -29,41 +28,68 @@ In TEDI:
 TEDI hits `releases/latest` on this repo, downloads the `.zip` asset
 produced by the [release workflow](.github/workflows/release.yml), runs
 its standard install pipeline (size cap, path-traversal guard, manifest
-validation, fingerprint), and activates the extension. The card with
-this README's logo appears in Settings → Extensions with a
-**Publish presence** toggle.
+validation, fingerprint), `chmod +x`'s the bundled sidecar binaries on
+Unix, and activates the extension. The card with this README's logo
+appears in Settings → Extensions with a **Publish presence** toggle.
 
 ### Updating
 
 The same Settings → Extensions screen has a **Check updates** button.
-TEDI compares the `tag_name` of the latest GitHub release against the
-installed `manifest.version`. If newer, an **Update** button appears
-and re-runs the install pipeline against the new release. No manual
-download.
+TEDI compares `tag_name` of the latest GitHub release against the
+installed `manifest.version`. If newer, an **Update** button re-runs
+the install pipeline against the new release. No manual download.
 
 ---
 
-## What it does
+## How it works
 
-When **Publish presence** is on, the extension subscribes to TEDI's
-live app-context bridge and forwards three things to your local Discord
-client:
+```
+Discord desktop client          (named pipe / Unix socket — OS-level)
+        ▲
+        │  discord-rich-presence IPC
+        │
++----------------------------+
+| sidecar/<platform>-<arch>/ |   tedi-discord-helper
+| tedi-discord-helper        |   - HTTP server on 127.0.0.1:<rand>
++----------------------------+   - JSON in / out
+        ▲
+        │  fetch("http://127.0.0.1:<port>/...")
+        │
++----------------------------+
+| extension.js (in webview)  |   - spawns the helper via shell_bg_spawn
+|                            |   - reads PORT=<n> from stdout via shell_bg_logs
+|                            |   - drives /connect /update /disconnect
++----------------------------+
+```
+
+When **Publish presence** is on, the extension:
+
+1. Picks the right helper binary for the current OS / arch (e.g.
+   `sidecar/windows-x86_64/tedi-discord-helper.exe`).
+2. Spawns it via `shell_bg_spawn`. The helper binds
+   `127.0.0.1:0` (kernel-assigned ephemeral port), prints
+   `PORT=<n>` to stdout, then services HTTP.
+3. The extension polls `shell_bg_logs` for up to 5 s waiting for
+   `PORT=`. Once it has the port it `fetch()`'s `/connect`,
+   `/update`, `/disconnect` as needed.
+4. Toggle off / disable / uninstall → `POST /shutdown` (helper clears
+   activity, closes IPC, exits) then `shell_bg_kill` for safety.
+
+The payload the helper sends to Discord:
 
 | Discord field | Source                                                                       |
 | ------------- | ---------------------------------------------------------------------------- |
 | **Details**   | `Working in <workspace folder name>` (or `Idle` if no workspace is open).    |
-| **State**     | `Editing <active filename>` (editor leaf), or `<N> terminals open` otherwise. |
-| **Started**   | Time of the first successful connect, so the card shows elapsed-since-launch rather than elapsed-since-last-switch. |
+| **State**     | `Editing <active filename>`, or `<N> terminals open` otherwise.              |
+| **Started**   | Time of the first successful connect, so the card shows elapsed-since-launch. |
 | **Large art** | TEDI logo, hosted in the Discord Developer Portal under app ID `1506303762418110505`. |
 
-Discord's `details` and `state` are capped at 128 code points (not
-bytes). Anything longer is silently rejected by Discord, so the
-extension truncates on the JS side to keep activity updates from being
-dropped.
+Discord caps `details` / `state` at 128 code points. The helper
+truncates server-side; the extension never has to worry.
 
-The retry loop kicks in when Discord isn't running: the extension waits
-15 s between attempts so a closed Discord client doesn't get hammered
-on every workspace switch.
+The retry loop kicks in when Discord isn't running: the extension
+waits 15 s between attempts so a closed Discord client doesn't get
+hammered on every workspace switch.
 
 ---
 
@@ -73,66 +99,48 @@ Declared in `manifest.json`:
 
 ```json
 "permissions": [
-  "invoke:discord_rpc_connect",
-  "invoke:discord_rpc_update",
-  "invoke:discord_rpc_disconnect",
   "settings:read",
   "settings:write",
-  "ui:toast"
+  "ui:toast",
+  "invoke:shell_bg_spawn",
+  "invoke:shell_bg_logs",
+  "invoke:shell_bg_kill"
 ]
 ```
 
 | Permission                          | What it lets the extension do                                  |
 | ----------------------------------- | -------------------------------------------------------------- |
-| `invoke:discord_rpc_connect`        | Open a Discord IPC connection.                                 |
-| `invoke:discord_rpc_update`         | Send a presence payload.                                       |
-| `invoke:discord_rpc_disconnect`     | Close the IPC connection.                                      |
 | `settings:read`, `settings:write`   | Persist the **Publish presence** toggle under `ext:tedi.discord-rich-presence:enabled` (namespaced; can't reach core settings). |
-| `ui:toast`                          | Surface one warning when the Discord backend isn't available.  |
+| `ui:toast`                          | Surface failure modes (no binary for this platform, helper crashed, etc). |
+| `invoke:shell_bg_spawn`             | Start the bundled sidecar binary as a long-running background process. |
+| `invoke:shell_bg_logs`              | Read the helper's stdout to discover the auto-assigned port. |
+| `invoke:shell_bg_kill`              | Stop the helper on disable / uninstall.                       |
 
-No filesystem, shell, or secret-keychain permissions are requested.
+No filesystem, secret-keychain, or one-shot shell permissions are
+requested. Network access is implicit: the extension only `fetch()`'s
+`127.0.0.1:<helperPort>` so no outbound traffic ever leaves the
+machine.
 
 ---
 
-## Backend caveat
+## Trust prompts
 
-This extension calls three Tauri commands that must exist in the host
-binary for actual Discord IPC to happen:
+The sidecar binary is built by GitHub Actions and unsigned. First
+launch on each platform:
 
-- `discord_rpc_connect(state: Tauri::State<DiscordState>) -> Result<(), String>`
-- `discord_rpc_update(state, payload: { details: String, state: String }) -> Result<(), String>`
-- `discord_rpc_disconnect(state) -> Result<(), String>`
-
-The mainline TEDI repo intentionally does not ship these commands, so
-the core binary stays free of integration-specific dependencies.
-
-The extension handles the missing-backend case gracefully:
-
-1. The first `invoke()` call after toggling on fails with a "command
-   not found" / "not allowed" error.
-2. The error string is matched against `BACKEND_MISSING_HINTS` in
-   `extension.js`.
-3. A `backendUnavailable` latch is set.
-4. The user sees a single warning toast.
-5. The 15 s retry loop is suppressed so we don't burn CPU on a
-   permanently failing invoke.
-6. Toggling off, disabling, or uninstalling still does the right thing
-   (idempotent teardown).
-
-If you want this extension to actually publish to Discord, there are
-two practical paths:
-
-1. **Fork the TEDI source** and add a `discord` Tauri module wrapping
-   the [`discord-rich-presence`](https://crates.io/crates/discord-rich-presence)
-   crate. Register the three commands. Rebuild.
-2. **Ship a sidecar** inside this extension's `.zip` (a Tauri plugin or
-   a native binary the extension spawns via `shell_bg_spawn`) that
-   exposes the same three commands over an IPC the extension can reach.
-   This route keeps host TEDI clean.
-
-Either way, no change is required to this extension's `extension.js`
-once the commands are reachable. The `BACKEND_MISSING_HINTS` detection
-short-circuits in the first `ensureConnected()` and never trips.
+- **Windows**: SmartScreen warning ("Windows protected your PC").
+  Click **More info → Run anyway**. SmartScreen remembers the choice
+  for that exact binary.
+- **macOS**: the file is downloaded by TEDI, so it gets the
+  `com.apple.quarantine` xattr. The first invocation may show
+  "tedi-discord-helper can't be opened". Fix once with:
+  ```bash
+  xattr -dr com.apple.quarantine ~/Library/Application\ Support/<TEDI app id>/extensions/tedi.discord-rich-presence/sidecar
+  ```
+  Replace `<TEDI app id>` with the bundle identifier of your TEDI
+  install (default: `id.ilhamrisky.tedi`).
+- **Linux**: nothing. TEDI's install pipeline already `chmod 0755`'s
+  everything under `sidecar/` after extraction.
 
 ---
 
@@ -141,14 +149,27 @@ short-circuits in the first `ensureConnected()` and never trips.
 ```bash
 git clone https://github.com/IlhamriSKY/TEDI.discord-rich-presence.git
 cd TEDI.discord-rich-presence
-# Edit manifest.json or extension.js. There is no build step. The
-# extension ships as plain ES module JavaScript.
 
-# Package locally to test against TEDI:
-zip -j tedi.discord-rich-presence-dev.zip manifest.json extension.js logo.png
+# Build the sidecar for your host platform (debug profile is fine for
+# development; release is what CI produces).
+cd sidecar-src
+cargo build --release
 
-# In TEDI: Settings -> Extensions -> From file -> select the .zip
+# Stage the binary where extension.js expects it. Pick the dir that
+# matches your host - e.g. for Linux x86_64:
+mkdir -p ../sidecar/linux-x86_64
+cp target/release/tedi-discord-helper ../sidecar/linux-x86_64/
+chmod +x ../sidecar/linux-x86_64/tedi-discord-helper
+cd ..
+
+# Package + install into TEDI to test:
+zip -r dev.zip manifest.json extension.js logo.png sidecar
+# In TEDI: Settings → Extensions → From file → dev.zip
 ```
+
+The first install will spawn the helper, you should see `PORT=<n>` in
+TEDI's dev-tools console (`[ext:tedi.discord-rich-presence] sidecar
+port <n>`) and Discord should reflect your workspace within a second.
 
 ---
 
