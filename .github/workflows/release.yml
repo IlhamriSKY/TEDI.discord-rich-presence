@@ -155,6 +155,7 @@ jobs:
             manifest.json \
             extension.js \
             logo.png \
+            discord.svg \
             sidecar
           unzip -l "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"

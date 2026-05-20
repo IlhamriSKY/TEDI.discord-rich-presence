@@ -267,7 +267,10 @@ async function ensureConnected() {
     connected = true;
     safeStatusBarSet({
       id: "connected",
-      icon: "logo.png",
+      // Official Discord brand mark (blurple Clyde) shipped alongside
+      // the extension. Distinct from `logo.png`, which is the TEDI-
+      // branded card icon shown in Settings -> Extensions.
+      icon: "discord.svg",
       tooltip: "Discord Rich Presence: connected",
       tone: "success",
     });
