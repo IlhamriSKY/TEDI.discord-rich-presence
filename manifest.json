@@ -1,7 +1,7 @@
 {
   "id": "tedi.discord-rich-presence",
   "name": "Discord Rich Presence",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Share what you're working on as a Discord status (workspace folder, active file, open terminals, elapsed time). Requires the Discord desktop app to be running. Enabling the extension starts the broadcast; disabling stops it.",
   "author": "IlhamRiski - ilhamriski.com",
   "homepage": "https://github.com/IlhamriSKY/TEDI.discord-rich-presence",
