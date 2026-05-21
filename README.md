@@ -103,53 +103,57 @@ truncates server-side; the extension never has to worry.
 ### Asset keys (small badge)
 
 The small-image badge resolves a TEDI tab into a Discord asset key. Every
-key in the table below must exist as a Rich Presence asset on the Discord
-Developer Portal for app id `1506303762418110505` (Settings → Rich
-Presence → Art Assets). Discord silently drops unknown keys, so the
-extension stays safe even if a key is missing — the badge just won't
-render.
+key the extension may send must exist as a Rich Presence asset on the
+Discord Developer Portal for app id `1506303762418110505` (Settings →
+Rich Presence → Art Assets). Three layers of defensive handling keep the
+presence stable when keys are missing or invalid:
 
-| Asset key       | When it's used                                              |
-| --------------- | ----------------------------------------------------------- |
-| `tab_terminal`  | Active leaf is a local terminal.                            |
-| `tab_ssh`       | Active leaf is an SSH-backed terminal.                      |
-| `tab_diff`      | Active tab is an AI diff or a git diff.                     |
-| `tab_preview`   | Active tab is the in-app browser preview.                   |
-| `tab_editor`    | Editor leaf with an unrecognised file extension (fallback). |
-| `lang_php`      | `.php`                                                      |
-| `lang_js`       | `.js` / `.mjs` / `.cjs` / `.jsx`                            |
-| `lang_ts`       | `.ts` / `.tsx`                                              |
-| `lang_python`   | `.py`                                                       |
-| `lang_rust`     | `.rs`                                                       |
-| `lang_go`       | `.go`                                                       |
-| `lang_java`     | `.java`                                                     |
-| `lang_kotlin`   | `.kt`                                                       |
-| `lang_swift`    | `.swift`                                                    |
-| `lang_c`        | `.c` / `.h`                                                 |
-| `lang_cpp`      | `.cpp` / `.cc` / `.hpp`                                     |
-| `lang_csharp`   | `.cs`                                                       |
-| `lang_ruby`     | `.rb`                                                       |
-| `lang_shell`    | `.sh` / `.bash` / `.zsh`                                    |
-| `lang_powershell` | `.ps1`                                                    |
-| `lang_html`     | `.html` / `.htm`                                            |
-| `lang_css`      | `.css` / `.scss` / `.sass` / `.less`                        |
-| `lang_json`     | `.json` / `.jsonc`                                          |
-| `lang_yaml`     | `.yaml` / `.yml`                                            |
-| `lang_toml`     | `.toml`                                                     |
-| `lang_xml`      | `.xml`                                                      |
-| `lang_markdown` | `.md` / `.mdx`                                              |
-| `lang_sql`      | `.sql`                                                      |
-| `lang_vue`      | `.vue`                                                      |
-| `lang_svelte`   | `.svelte`                                                   |
-| `lang_dart`     | `.dart`                                                     |
-| `lang_lua`      | `.lua`                                                      |
-| `lang_docker`   | `Dockerfile` / `.dockerfile`                                |
-| `lang_env`      | `.env`                                                      |
-| `lang_text`     | `.txt` / `.log`                                             |
+1. **Extension JS** — file resolution walks whole-filename map (Makefile,
+   Dockerfile, LICENSE, ...) → compound-prefix specials (`.env.*`) →
+   plain extension → `tab_editor` fallback.
+2. **Sidecar Rust** — validates the key against Discord's format
+   (lowercase alphanumeric + underscore, ≤32 chars) before calling
+   `set_activity`. Invalid keys are silently dropped (logged via
+   `eprintln`) so a malformed payload never wipes the entire presence.
+3. **Discord** — unknown keys are silently dropped server-side. The big
+   image stays as the TEDI logo; only the badge disappears.
 
-Assets are 512×512 PNG. The full mapping lives in `LANG_ASSET_BY_EXT`
-inside `extension.js` — add new entries there and re-release if you want
-to cover more languages.
+The full machine-readable mapping lives in `LANG_ASSET_BY_EXT` +
+`LANG_ASSET_BY_FILENAME` inside `extension.js`. All 27 icons come from
+the same **HugeIcons free set** that `TabBar.tsx` uses, keeping the
+badge style consistent with TEDI's UI.
+
+**Tab kinds (5)** — exact match with `TabBar.tsx`:
+`tab_terminal` (computer-terminal-02), `tab_ssh` (cloud-server),
+`tab_diff` (git-compare), `tab_preview` (globe-02),
+`tab_editor` (pencil-edit-02).
+
+**Brand-specific languages (12)** — HugeIcons has dedicated icons:
+`lang_php`, `lang_js` (also JSX / CoffeeScript), `lang_ts` (also TSX),
+`lang_python`, `lang_java`, `lang_html`, `lang_css` (also SCSS / SASS /
+LESS / Stylus), `lang_sql`, `lang_shell` (all shell scripting incl.
+PowerShell), `lang_dart`, `lang_csv` (also TSV), `lang_xml` (also XSD /
+XSL / plist).
+
+**Semantic generic (10)** — HugeIcons `File*` family for media + fallback
+groups:
+
+| Key | HugeIcons | Captures |
+| --- | --------- | -------- |
+| `lang_code` | `file-code` | Languages without brand icon (Rust, Go, Kotlin, Swift, C/C++, C#, Ruby, Lua, Vue, Svelte, Elixir, Haskell, Clojure, Scala, F#, OCaml, Perl, R, Julia, Solidity, Zig, Nim, Makefile, CMake, Terraform, Nix, Vim, Proto, Jupyter, Dockerfile, ...) |
+| `lang_json` | `file-braces` | `.json` / `.jsonc` / `.json5` / `.jsonl` / `.ndjson` |
+| `lang_config` | `file-sliders` | TOML / YAML / INI / CONF / properties / editorconfig / dotfile configs |
+| `lang_markdown` | `file-edit` | Markdown, reStructuredText, AsciiDoc, LaTeX |
+| `lang_text` | `file-empty-02` | `.txt` / `.log` / LICENSE / README / CHANGELOG / AUTHORS |
+| `lang_env` | `file-key` | `.env*` |
+| `lang_image` | `file-image` | `.png` / `.jpg` / `.gif` / `.webp` / `.svg` / `.ico` / `.bmp` / `.tiff` / `.avif` / `.heic` |
+| `lang_video` | `file-video` | `.mp4` / `.webm` / `.mov` / `.avi` / `.mkv` / `.flv` / `.m4v` / `.mpg` |
+| `lang_audio` | `file-audio` | `.mp3` / `.wav` / `.ogg` / `.flac` / `.m4a` / `.aac` / `.opus` / `.mid` |
+| `lang_archive` | `file-zip` | `.zip` / `.tar` / `.gz` / `.7z` / `.rar` / `.bz2` / `.xz` / `.zst` |
+
+See `icons-upload/README.md` (gitignored staging folder) for the full
+extension → key mapping, the upload checklist, and the Iconify URLs the
+download script uses.
 
 The retry loop kicks in when Discord isn't running: the extension
 waits 15 s between attempts so a closed Discord client doesn't get

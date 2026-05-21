@@ -363,6 +363,19 @@ fn truncate_chars(s: &str, max_chars: usize) -> String {
     s.chars().take(max_chars).collect()
 }
 
+/// Discord asset keys are lowercase letters / digits / underscores, max 32
+/// chars (matches the Developer Portal validation). Anything else is
+/// rejected: malformed payloads should drop the badge silently rather than
+/// fail the whole `set_activity` call. Empty string is rejected too so
+/// callers can use `""` as "no badge".
+fn is_valid_asset_key(s: &str) -> bool {
+    if s.is_empty() || s.len() > 32 {
+        return false;
+    }
+    s.bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
 fn connect(state: &State) -> Result<String, String> {
     let mut guard = unpoison(state.client.lock());
     if guard.is_some() {
@@ -407,11 +420,20 @@ fn update(state: &State, body: &str) -> Result<String, String> {
     let mut assets = Assets::new()
         .large_image(LARGE_IMAGE_KEY)
         .large_text(LARGE_IMAGE_TEXT);
-    if !small_image_key.is_empty() {
+    // Only attach the small badge if the key passes Discord's asset-key
+    // format (lowercase alphanumeric + underscore, ≤32 chars). An invalid
+    // key would otherwise cause `set_activity` to fail and clear the
+    // entire presence — we'd rather drop just the badge.
+    if is_valid_asset_key(&small_image_key) {
         assets = assets.small_image(&small_image_key);
         if !small_image_text.is_empty() {
             assets = assets.small_text(&small_image_text);
         }
+    } else if !small_image_key.is_empty() {
+        eprintln!(
+            "sidecar: dropping invalid small_image key {:?}",
+            small_image_key
+        );
     }
     activity = activity.assets(assets);
     activity = activity.buttons(vec![Button::new(BUTTON_LABEL, BUTTON_URL)]);
