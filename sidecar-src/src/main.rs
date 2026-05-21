@@ -28,7 +28,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use discord_rich_presence::{
-    activity::{Activity, Assets, Timestamps},
+    activity::{Activity, Assets, Button, Timestamps},
     DiscordIpc, DiscordIpcClient,
 };
 use serde::Deserialize;
@@ -52,6 +52,11 @@ const PARENT_CHECK_EVERY_TICKS: u32 = 5;
 const DISCORD_APP_ID: &str = "1506303762418110505";
 const LARGE_IMAGE_KEY: &str = "tedi_logo";
 const LARGE_IMAGE_TEXT: &str = "TEDI - Terminal Environment & Development Infrastructure";
+// Persistent button shown to other users viewing the presence card.
+// Discord renders buttons only on profiles of OTHER viewers, not on the
+// owner's own card — known platform behavior, not a bug.
+const BUTTON_LABEL: &str = "Visit TEDI";
+const BUTTON_URL: &str = "https://tedi.ilhamriski.com";
 
 struct State {
     client: Mutex<Option<DiscordIpcClient>>,
@@ -393,6 +398,7 @@ fn update(state: &State, body: &str) -> Result<String, String> {
             .large_image(LARGE_IMAGE_KEY)
             .large_text(LARGE_IMAGE_TEXT),
     );
+    activity = activity.buttons(vec![Button::new(BUTTON_LABEL, BUTTON_URL)]);
 
     client.set_activity(activity).map_err(|e| e.to_string())?;
     Ok(String::new())
