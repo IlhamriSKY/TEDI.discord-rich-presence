@@ -33,7 +33,12 @@ let draining = false;
 let retryTimer = null;
 /** Bumped on every teardown so an in-flight retry knows to bail. */
 let sessionGen = 0;
-let lastContext = { workspaceCwd: null, activeFileName: null, terminalCount: 0 };
+let lastContext = {
+  workspaceCwd: null,
+  activeFileName: null,
+  terminalCount: 0,
+  activeTabKind: null,
+};
 /** Latched on teardown so any late drain calls become no-ops. */
 let active = false;
 
@@ -109,6 +114,91 @@ function folderName(p) {
   return parts[parts.length - 1] || "";
 }
 
+// File extension -> Discord asset key for the small-image badge. Keys must
+// match assets uploaded to the Discord Developer Portal under app id
+// 1506303762418110505 (see README "Asset keys"). Unknown extensions fall
+// back to `tab_editor` so the badge still tells the viewer "this is a
+// file" rather than disappearing.
+const LANG_ASSET_BY_EXT = {
+  php: "lang_php",
+  js: "lang_js",
+  mjs: "lang_js",
+  cjs: "lang_js",
+  jsx: "lang_js",
+  ts: "lang_ts",
+  tsx: "lang_ts",
+  py: "lang_python",
+  rs: "lang_rust",
+  go: "lang_go",
+  java: "lang_java",
+  kt: "lang_kotlin",
+  swift: "lang_swift",
+  c: "lang_c",
+  h: "lang_c",
+  cpp: "lang_cpp",
+  cc: "lang_cpp",
+  hpp: "lang_cpp",
+  cs: "lang_csharp",
+  rb: "lang_ruby",
+  sh: "lang_shell",
+  bash: "lang_shell",
+  zsh: "lang_shell",
+  ps1: "lang_powershell",
+  html: "lang_html",
+  htm: "lang_html",
+  css: "lang_css",
+  scss: "lang_css",
+  sass: "lang_css",
+  less: "lang_css",
+  json: "lang_json",
+  jsonc: "lang_json",
+  yaml: "lang_yaml",
+  yml: "lang_yaml",
+  toml: "lang_toml",
+  xml: "lang_xml",
+  md: "lang_markdown",
+  mdx: "lang_markdown",
+  sql: "lang_sql",
+  vue: "lang_vue",
+  svelte: "lang_svelte",
+  dart: "lang_dart",
+  lua: "lang_lua",
+  dockerfile: "lang_docker",
+  env: "lang_env",
+  txt: "lang_text",
+  log: "lang_text",
+};
+
+function fileExt(name) {
+  if (!name) return "";
+  const lower = String(name).toLowerCase();
+  if (lower === "dockerfile" || lower.endsWith(".dockerfile")) return "dockerfile";
+  const dot = lower.lastIndexOf(".");
+  if (dot <= 0 || dot === lower.length - 1) return "";
+  return lower.slice(dot + 1);
+}
+
+function smallImageFor(c) {
+  switch (c.activeTabKind) {
+    case "terminal":
+      return { key: "tab_terminal", text: "Terminal" };
+    case "ssh":
+      return { key: "tab_ssh", text: "SSH session" };
+    case "diff":
+      return { key: "tab_diff", text: "Reviewing diff" };
+    case "preview":
+      return { key: "tab_preview", text: "Browser preview" };
+    case "editor": {
+      const ext = fileExt(c.activeFileName);
+      const key = LANG_ASSET_BY_EXT[ext] || "tab_editor";
+      const text = c.activeFileName ? `Editing ${c.activeFileName}` : "Editing file";
+      return { key, text };
+    }
+    default:
+      return null;
+  }
+}
+
 function buildPayload(c) {
   const folder = folderName(c.workspaceCwd);
   const details = folder ? `Working in ${folder}` : "Idle";
@@ -118,7 +208,13 @@ function buildPayload(c) {
   } else if (c.terminalCount > 0) {
     state = `${c.terminalCount} terminal${c.terminalCount === 1 ? "" : "s"} open`;
   }
-  return { details, state };
+  const small = smallImageFor(c);
+  return {
+    details,
+    state,
+    small_image: small?.key ?? "",
+    small_text: small?.text ?? "",
+  };
 }
 
 async function spawnHelper() {

@@ -94,9 +94,62 @@ The payload the helper sends to Discord:
 | **State**     | `Editing <active filename>`, or `<N> terminals open` otherwise.              |
 | **Started**   | Time of the first successful connect, so the card shows elapsed-since-launch. |
 | **Large art** | TEDI logo, hosted in the Discord Developer Portal under app ID `1506303762418110505`. |
+| **Small art** | Badge for the focused tab (terminal / SSH / diff / preview / language icon). Falls back to no badge when the host predates `activeTabKind`. |
+| **Button**    | "Visit TEDI" → `https://tedi.ilhamriski.com` (only visible to other users viewing your profile — Discord hides Rich Presence buttons from the owner's own client). |
 
 Discord caps `details` / `state` at 128 code points. The helper
 truncates server-side; the extension never has to worry.
+
+### Asset keys (small badge)
+
+The small-image badge resolves a TEDI tab into a Discord asset key. Every
+key in the table below must exist as a Rich Presence asset on the Discord
+Developer Portal for app id `1506303762418110505` (Settings → Rich
+Presence → Art Assets). Discord silently drops unknown keys, so the
+extension stays safe even if a key is missing — the badge just won't
+render.
+
+| Asset key       | When it's used                                              |
+| --------------- | ----------------------------------------------------------- |
+| `tab_terminal`  | Active leaf is a local terminal.                            |
+| `tab_ssh`       | Active leaf is an SSH-backed terminal.                      |
+| `tab_diff`      | Active tab is an AI diff or a git diff.                     |
+| `tab_preview`   | Active tab is the in-app browser preview.                   |
+| `tab_editor`    | Editor leaf with an unrecognised file extension (fallback). |
+| `lang_php`      | `.php`                                                      |
+| `lang_js`       | `.js` / `.mjs` / `.cjs` / `.jsx`                            |
+| `lang_ts`       | `.ts` / `.tsx`                                              |
+| `lang_python`   | `.py`                                                       |
+| `lang_rust`     | `.rs`                                                       |
+| `lang_go`       | `.go`                                                       |
+| `lang_java`     | `.java`                                                     |
+| `lang_kotlin`   | `.kt`                                                       |
+| `lang_swift`    | `.swift`                                                    |
+| `lang_c`        | `.c` / `.h`                                                 |
+| `lang_cpp`      | `.cpp` / `.cc` / `.hpp`                                     |
+| `lang_csharp`   | `.cs`                                                       |
+| `lang_ruby`     | `.rb`                                                       |
+| `lang_shell`    | `.sh` / `.bash` / `.zsh`                                    |
+| `lang_powershell` | `.ps1`                                                    |
+| `lang_html`     | `.html` / `.htm`                                            |
+| `lang_css`      | `.css` / `.scss` / `.sass` / `.less`                        |
+| `lang_json`     | `.json` / `.jsonc`                                          |
+| `lang_yaml`     | `.yaml` / `.yml`                                            |
+| `lang_toml`     | `.toml`                                                     |
+| `lang_xml`      | `.xml`                                                      |
+| `lang_markdown` | `.md` / `.mdx`                                              |
+| `lang_sql`      | `.sql`                                                      |
+| `lang_vue`      | `.vue`                                                      |
+| `lang_svelte`   | `.svelte`                                                   |
+| `lang_dart`     | `.dart`                                                     |
+| `lang_lua`      | `.lua`                                                      |
+| `lang_docker`   | `Dockerfile` / `.dockerfile`                                |
+| `lang_env`      | `.env`                                                      |
+| `lang_text`     | `.txt` / `.log`                                             |
+
+Assets are 512×512 PNG. The full mapping lives in `LANG_ASSET_BY_EXT`
+inside `extension.js` — add new entries there and re-release if you want
+to cover more languages.
 
 The retry loop kicks in when Discord isn't running: the extension
 waits 15 s between attempts so a closed Discord client doesn't get

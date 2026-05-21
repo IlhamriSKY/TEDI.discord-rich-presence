@@ -78,6 +78,15 @@ struct UpdatePayload {
     details: String,
     #[serde(default)]
     state: String,
+    /// Asset key for the small badge overlay (uploaded to the Discord
+    /// Developer Portal under app id `1506303762418110505`). Empty string
+    /// means "no badge" and the helper falls back to the large image alone.
+    #[serde(default)]
+    small_image: String,
+    /// Hover text for the small badge. Discord caps at 128 code points;
+    /// `truncate_chars` clamps both fields server-side.
+    #[serde(default)]
+    small_text: String,
 }
 
 fn main() {
@@ -384,6 +393,8 @@ fn update(state: &State, body: &str) -> Result<String, String> {
 
     let details_text = truncate_chars(&payload.details, 128);
     let state_text = truncate_chars(&payload.state, 128);
+    let small_image_key = truncate_chars(&payload.small_image, 32);
+    let small_image_text = truncate_chars(&payload.small_text, 128);
 
     let mut activity = Activity::new();
     if details_text.chars().count() >= 2 {
@@ -393,11 +404,16 @@ fn update(state: &State, body: &str) -> Result<String, String> {
         activity = activity.state(&state_text);
     }
     activity = activity.timestamps(Timestamps::new().start(started / 1000));
-    activity = activity.assets(
-        Assets::new()
-            .large_image(LARGE_IMAGE_KEY)
-            .large_text(LARGE_IMAGE_TEXT),
-    );
+    let mut assets = Assets::new()
+        .large_image(LARGE_IMAGE_KEY)
+        .large_text(LARGE_IMAGE_TEXT);
+    if !small_image_key.is_empty() {
+        assets = assets.small_image(&small_image_key);
+        if !small_image_text.is_empty() {
+            assets = assets.small_text(&small_image_text);
+        }
+    }
+    activity = activity.assets(assets);
     activity = activity.buttons(vec![Button::new(BUTTON_LABEL, BUTTON_URL)]);
 
     client.set_activity(activity).map_err(|e| e.to_string())?;
