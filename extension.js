@@ -348,7 +348,7 @@ const LANG_ASSET_BY_EXT = {
 };
 
 // Exact-filename mapping (case-insensitive, no extension or compound name).
-// Wins over the extension table — checked first so `Dockerfile.prod` maps
+// Wins over the extension table - checked first so `Dockerfile.prod` maps
 // the same as bare `Dockerfile` and `LICENSE` doesn't get the empty-ext
 // fallback.
 const LANG_ASSET_BY_FILENAME = {

@@ -44,7 +44,7 @@ the install pipeline against the new release. No manual download.
 ## How it works
 
 ```
-Discord desktop client          (named pipe / Unix socket — OS-level)
+Discord desktop client          (named pipe / Unix socket - OS-level)
         ▲
         │  discord-rich-presence IPC
         │
@@ -95,7 +95,7 @@ The payload the helper sends to Discord:
 | **Started**   | Time of the first successful connect, so the card shows elapsed-since-launch. |
 | **Large art** | TEDI logo, hosted in the Discord Developer Portal under app ID `1506303762418110505`. |
 | **Small art** | Badge for the focused tab (terminal / SSH / diff / preview / language icon). Falls back to no badge when the host predates `activeTabKind`. |
-| **Button**    | "Visit TEDI" → `https://tedi.ilhamriski.com` (only visible to other users viewing your profile — Discord hides Rich Presence buttons from the owner's own client). |
+| **Button**    | "Visit TEDI" → `https://tedi.ilhamriski.com` (only visible to other users viewing your profile - Discord hides Rich Presence buttons from the owner's own client). |
 
 Discord caps `details` / `state` at 128 code points. The helper
 truncates server-side; the extension never has to worry.
@@ -108,14 +108,14 @@ Discord Developer Portal for app id `1506303762418110505` (Settings →
 Rich Presence → Art Assets). Three layers of defensive handling keep the
 presence stable when keys are missing or invalid:
 
-1. **Extension JS** — file resolution walks whole-filename map (Makefile,
+1. **Extension JS** - file resolution walks whole-filename map (Makefile,
    Dockerfile, LICENSE, ...) → compound-prefix specials (`.env.*`) →
    plain extension → `tab_editor` fallback.
-2. **Sidecar Rust** — validates the key against Discord's format
+2. **Sidecar Rust** - validates the key against Discord's format
    (lowercase alphanumeric + underscore, ≤32 chars) before calling
    `set_activity`. Invalid keys are silently dropped (logged via
    `eprintln`) so a malformed payload never wipes the entire presence.
-3. **Discord** — unknown keys are silently dropped server-side. The big
+3. **Discord** - unknown keys are silently dropped server-side. The big
    image stays as the TEDI logo; only the badge disappears.
 
 The full machine-readable mapping lives in `LANG_ASSET_BY_EXT` +
@@ -123,19 +123,19 @@ The full machine-readable mapping lives in `LANG_ASSET_BY_EXT` +
 the same **HugeIcons free set** that `TabBar.tsx` uses, keeping the
 badge style consistent with TEDI's UI.
 
-**Tab kinds (5)** — exact match with `TabBar.tsx`:
+**Tab kinds (5)** - exact match with `TabBar.tsx`:
 `tab_terminal` (computer-terminal-02), `tab_ssh` (cloud-server),
 `tab_diff` (git-compare), `tab_preview` (globe-02),
 `tab_editor` (pencil-edit-02).
 
-**Brand-specific languages (12)** — HugeIcons has dedicated icons:
+**Brand-specific languages (12)** - HugeIcons has dedicated icons:
 `lang_php`, `lang_js` (also JSX / CoffeeScript), `lang_ts` (also TSX),
 `lang_python`, `lang_java`, `lang_html`, `lang_css` (also SCSS / SASS /
 LESS / Stylus), `lang_sql`, `lang_shell` (all shell scripting incl.
 PowerShell), `lang_dart`, `lang_csv` (also TSV), `lang_xml` (also XSD /
 XSL / plist).
 
-**Semantic generic (10)** — HugeIcons `File*` family for media + fallback
+**Semantic generic (10)** - HugeIcons `File*` family for media + fallback
 groups:
 
 | Key | HugeIcons | Captures |

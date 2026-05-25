@@ -54,7 +54,7 @@ const LARGE_IMAGE_KEY: &str = "tedi_logo";
 const LARGE_IMAGE_TEXT: &str = "TEDI - Terminal Environment & Development Infrastructure";
 // Persistent button shown to other users viewing the presence card.
 // Discord renders buttons only on profiles of OTHER viewers, not on the
-// owner's own card — known platform behavior, not a bug.
+// owner's own card - known platform behavior, not a bug.
 const BUTTON_LABEL: &str = "Visit TEDI";
 const BUTTON_URL: &str = "https://tedi.ilhamriski.com";
 
@@ -423,7 +423,7 @@ fn update(state: &State, body: &str) -> Result<String, String> {
     // Only attach the small badge if the key passes Discord's asset-key
     // format (lowercase alphanumeric + underscore, ≤32 chars). An invalid
     // key would otherwise cause `set_activity` to fail and clear the
-    // entire presence — we'd rather drop just the badge.
+    // entire presence - we'd rather drop just the badge.
     if is_valid_asset_key(&small_image_key) {
         assets = assets.small_image(&small_image_key);
         if !small_image_text.is_empty() {
