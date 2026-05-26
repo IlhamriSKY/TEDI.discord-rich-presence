@@ -436,31 +436,20 @@ function smallImageFor(c) {
 
 function buildPayload(c) {
   const folder = folderName(c.workspaceCwd);
-  // Workspace + total-terminal counts surface in `details` so the viewer
-  // always sees the multi-workspace footprint, even when the user is
-  // editing a file (which fills `state`). Older TEDIs omit these fields;
-  // the helpers below coerce undefined to zero so we never render "NaN".
   const workspaceCount = Math.max(0, Number(c.workspaceCount ?? 0) || 0);
   const terminalCountAll = Math.max(0, Number(c.terminalCountAll ?? c.terminalCount ?? 0) || 0);
-  const counts = [];
-  if (workspaceCount > 1) {
-    counts.push(`${workspaceCount} workspaces`);
+
+  const details = folder || "Idle";
+
+  const parts = [];
+  if (workspaceCount > 0) {
+    parts.push(`${workspaceCount} workspace${workspaceCount === 1 ? "" : "s"}`);
   }
   if (terminalCountAll > 0) {
-    counts.push(`${terminalCountAll} terminal${terminalCountAll === 1 ? "" : "s"}`);
+    parts.push(`${terminalCountAll} terminal${terminalCountAll === 1 ? "" : "s"}`);
   }
-  let details;
-  if (folder) {
-    details = counts.length ? `${folder} · ${counts.join(", ")}` : `Working in ${folder}`;
-  } else {
-    details = counts.length ? counts.join(", ") : "Idle";
-  }
-  let state = "";
-  if (c.activeFileName) {
-    state = `Editing ${c.activeFileName}`;
-  } else if (terminalCountAll > 0) {
-    state = `${terminalCountAll} terminal${terminalCountAll === 1 ? "" : "s"} open`;
-  }
+  const state = parts.join(", ");
+
   const small = smallImageFor(c);
   return {
     details,
