@@ -64,7 +64,7 @@ jobs:
             runner: ubuntu-latest
             sidecar_dir: linux-aarch64
             exe_suffix: ""
-            apt_packages: gcc-aarch64-linux-gnu
+            apt_packages: gcc-aarch64-linux-gnu libc6-dev-arm64-cross
             linker: aarch64-linux-gnu-gcc
 
     steps:
