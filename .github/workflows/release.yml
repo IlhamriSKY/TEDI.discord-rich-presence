@@ -33,6 +33,13 @@ jobs:
             runner: windows-latest
             sidecar_dir: windows-x86_64
             exe_suffix: .exe
+          # ARM64 Windows is a straight Rust cross-compile from the x86_64
+          # windows-latest runner. MSVC link.exe ships with the ARM64
+          # toolchain so no extra setup is needed.
+          - target: aarch64-pc-windows-msvc
+            runner: windows-latest
+            sidecar_dir: windows-aarch64
+            exe_suffix: .exe
           # Both Mac targets ride macos-latest (M1 = aarch64). x86_64 is a
           # straight Rust cross-compile - clang on Apple Silicon handles the
           # -arch x86_64 link by default. macos-13 (Intel hosted runner) is
@@ -50,6 +57,15 @@ jobs:
             runner: ubuntu-latest
             sidecar_dir: linux-x86_64
             exe_suffix: ""
+          # ARM64 Linux cross-compile. The `apt_packages` install gives us
+          # `aarch64-linux-gnu-gcc` and the matching libc headers; the
+          # `linker` env var below points cargo at it.
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            sidecar_dir: linux-aarch64
+            exe_suffix: ""
+            apt_packages: gcc-aarch64-linux-gnu
+            linker: aarch64-linux-gnu-gcc
 
     steps:
       - name: Checkout
@@ -59,6 +75,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install cross-compile toolchain
+        if: matrix.apt_packages != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ${{ matrix.apt_packages }}
 
       - name: Cache cargo registry / target
         uses: actions/cache@v4
@@ -71,6 +95,9 @@ jobs:
 
       - name: Build sidecar (release)
         working-directory: sidecar-src
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.linker }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Stage binary

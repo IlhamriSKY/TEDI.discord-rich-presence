@@ -1,9 +1,10 @@
 # TEDI Discord Rich Presence
 
 Publishes your current [TEDI](https://github.com/IlhamriSKY/TEDI)
-workspace as a Discord Rich Presence status — your friends see the
-folder you're working in, the active file, and an icon for the focused
-tab (terminal, SSH, editor, diff, preview).
+workspace as a Discord Rich Presence status: your friends see the
+folder you're working in, how many workspaces and terminals you have
+open, and an icon for the focused tab (terminal, SSH, editor, diff,
+preview, plus a language icon when editing).
 
 <p align="center">
   <img src="logo.png" alt="Discord Rich Presence" width="128" />
@@ -54,7 +55,8 @@ On Switch-on the extension:
 2. Spawns it via `shell_bg_spawn_direct`; reads `PORT=<n>` from
    stdout.
 3. POSTs `/connect`, then `/update` on every workspace change
-   (workspace folder name, active file, terminal count, tab kind).
+   (workspace folder, workspace + terminal counts, active file, tab
+   kind).
 
 The helper exits in three independent ways: `/shutdown` on Switch-off
 or extension uninstall, parent-PID watchdog if TEDI crashes, or a 4 h
@@ -64,12 +66,12 @@ The Rich Presence card the helper sends to Discord:
 
 | Field | Source |
 | --- | --- |
-| Details | `Working in <workspace>` (or `Idle`). |
-| State | `Editing <file>` or `<N> terminals open`. |
-| Started | First successful connect → shows elapsed-since-launch. |
+| Details | `<workspace folder>` (or `Idle` when no workspace is open). |
+| State | `<N> workspace[s], <M> terminal[s]` (omits parts that are zero, blank when both are zero). |
+| Started | First successful connect, shows elapsed-since-launch. |
 | Large art | TEDI logo. |
-| Small art | Tab-kind icon (terminal / SSH / editor / diff / preview / language). |
-| Button | "Visit TEDI" → tedi.ilhamriski.com. |
+| Small art | Tab-kind icon (terminal / SSH / editor / diff / preview / language). Hover text names the active file when editing. |
+| Button | "Visit TEDI", tedi.ilhamriski.com. |
 
 ## Permissions
 
