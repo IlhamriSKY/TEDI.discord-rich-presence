@@ -38,6 +38,11 @@ let lastContext = {
   activeFileName: null,
   terminalCount: 0,
   activeTabKind: null,
+  // TEDI >= 0.2.27 ships these on every onContextChange snapshot. Older
+  // hosts simply omit them; the build below treats `undefined` the same
+  // as zero so the presence still renders.
+  workspaceCount: 1,
+  terminalCountAll: 0,
 };
 /** Latched on teardown so any late drain calls become no-ops. */
 let active = false;
@@ -431,12 +436,30 @@ function smallImageFor(c) {
 
 function buildPayload(c) {
   const folder = folderName(c.workspaceCwd);
-  const details = folder ? `Working in ${folder}` : "Idle";
+  // Workspace + total-terminal counts surface in `details` so the viewer
+  // always sees the multi-workspace footprint, even when the user is
+  // editing a file (which fills `state`). Older TEDIs omit these fields;
+  // the helpers below coerce undefined to zero so we never render "NaN".
+  const workspaceCount = Math.max(0, Number(c.workspaceCount ?? 0) || 0);
+  const terminalCountAll = Math.max(0, Number(c.terminalCountAll ?? c.terminalCount ?? 0) || 0);
+  const counts = [];
+  if (workspaceCount > 1) {
+    counts.push(`${workspaceCount} workspaces`);
+  }
+  if (terminalCountAll > 0) {
+    counts.push(`${terminalCountAll} terminal${terminalCountAll === 1 ? "" : "s"}`);
+  }
+  let details;
+  if (folder) {
+    details = counts.length ? `${folder} · ${counts.join(", ")}` : `Working in ${folder}`;
+  } else {
+    details = counts.length ? counts.join(", ") : "Idle";
+  }
   let state = "";
   if (c.activeFileName) {
     state = `Editing ${c.activeFileName}`;
-  } else if (c.terminalCount > 0) {
-    state = `${c.terminalCount} terminal${c.terminalCount === 1 ? "" : "s"} open`;
+  } else if (terminalCountAll > 0) {
+    state = `${terminalCountAll} terminal${terminalCountAll === 1 ? "" : "s"} open`;
   }
   const small = smallImageFor(c);
   return {
