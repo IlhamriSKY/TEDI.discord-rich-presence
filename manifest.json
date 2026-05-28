@@ -1,7 +1,7 @@
 {
   "id": "tedi.discord-rich-presence",
   "name": "Discord Rich Presence",
-  "version": "1.5.8",
+  "version": "1.5.9",
   "description": "Shares your TEDI activity as a Discord status: active workspace, file, open terminals across all workspaces, and elapsed time. Requires the Discord desktop app to be running.",
   "author": "IlhamRiski - ilhamriski.com",
   "homepage": "https://github.com/IlhamriSKY/TEDI.discord-rich-presence",
@@ -15,6 +15,6 @@
     "invoke:shell_bg_kill"
   ],
   "engines": {
-    "tedi": ">=0.2.6"
+    "tedi": ">=0.3.9"
   }
 }
