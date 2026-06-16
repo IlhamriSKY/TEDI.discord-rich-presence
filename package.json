@@ -1,6 +1,6 @@
 {
   "name": "tedi-discord-rich-presence",
-  "version": "1.5.10",
+  "version": "1.5.11",
   "private": true,
   "type": "module",
   "description": "Build tooling for the TEDI Discord Rich Presence extension. The shipped artifact is the bundled extension.js (built in CI into the release .zip, not committed); source lives in src/.",
