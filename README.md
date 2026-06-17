@@ -31,21 +31,10 @@ card. If a new release exists, click **Update** to reinstall in place.
 
 ## How it works
 
-```
-Discord desktop client            (named pipe / Unix socket, OS-level)
-        ▲
-        │ discord-rich-presence IPC
-        │
-┌────────────────────────────┐
-│ tedi-discord-helper        │  ← native sidecar (one per platform)
-│ HTTP 127.0.0.1:<random>    │  ← extension talks to it via fetch()
-└────────────────────────────┘
-        ▲
-        │ /connect, /update, /shutdown
-        │
-┌────────────────────────────┐
-│ extension.js               │  spawns the helper, polls stdout for PORT
-└────────────────────────────┘
+```mermaid
+flowchart LR
+    A["extension.js<br/>spawns the helper,<br/>polls stdout for PORT"] -->|"HTTP 127.0.0.1:random<br/>/connect, /update, /shutdown"| B["tedi-discord-helper<br/>native sidecar,<br/>one per platform"]
+    B -->|"discord-rich-presence IPC<br/>named pipe / Unix socket"| C["Discord desktop client"]
 ```
 
 On Switch-on the extension:
