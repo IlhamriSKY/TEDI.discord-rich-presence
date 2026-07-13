@@ -1,6 +1,6 @@
 # TEDI Discord Rich Presence
 
-Publishes your current [TEDI](https://github.com/IlhamriSKY/TEDI) workspace as a
+Publishes your current [TEDI](https://tedi.ilhamriski.com/) workspace as a
 Discord Rich Presence status: your friends see the folder you're working in, how
 many workspaces and terminals you have open, and an icon for the focused tab
 (terminal, SSH, editor, diff, preview, plus a language icon when editing).

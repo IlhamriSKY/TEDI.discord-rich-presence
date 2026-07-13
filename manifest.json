@@ -4,7 +4,7 @@
   "version": "1.5.11",
   "description": "Shares your TEDI activity as a Discord status: active workspace, file, open terminals across all workspaces, and elapsed time. Requires the Discord desktop app to be running.",
   "author": "IlhamRiski - ilhamriski.com",
-  "homepage": "https://github.com/IlhamriSKY/TEDI.discord-rich-presence",
+  "homepage": "https://tedi.ilhamriski.com/",
   "icon": "logo.png",
   "main": "extension.js",
   "permissions": [
