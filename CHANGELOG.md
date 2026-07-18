@@ -2,6 +2,12 @@
 
 All notable changes to **TEDI Discord Rich Presence**. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [1.5.12] - 2026-07-18
+
+### Changed
+
+- **Documentation.** Project links point at the TEDI website (https://tedi.ilhamriski.com/) in both `manifest.json` and the README, the README follows the structure shared across the TEDI extensions, and "How it works" is rendered as a Mermaid diagram. No behaviour change.
+
 ## [1.5.11] - 2026-06-16
 
 ### Changed
