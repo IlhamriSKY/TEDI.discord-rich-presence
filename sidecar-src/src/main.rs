@@ -51,7 +51,7 @@ const PARENT_CHECK_EVERY_TICKS: u32 = 5;
 
 const DISCORD_APP_ID: &str = "1506303762418110505";
 const LARGE_IMAGE_KEY: &str = "tedi_logo";
-const LARGE_IMAGE_TEXT: &str = "TEDI - Terminal Environment & Development Infrastructure";
+const LARGE_IMAGE_TEXT: &str = "TEDI - Terminal Director";
 // Persistent button shown to other users viewing the presence card.
 // Discord renders buttons only on profiles of OTHER viewers, not on the
 // owner's own card - known platform behavior, not a bug.

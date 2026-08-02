@@ -2,6 +2,12 @@
 
 All notable changes to **TEDI Discord Rich Presence**. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [1.5.13] - 2026-08-02
+
+### Fixed
+
+- **The presence card still called TEDI by its old name.** Hovering the large icon in Discord read "Terminal Environment & Development Infrastructure"; the app was renamed to Terminal Director in TEDI v0.3.95 and the sidecar was the last place carrying the old expansion. The tooltip is the only thing that changes, so an already-running presence picks it up on the next sidecar start.
+
 ## [1.5.12] - 2026-07-18
 
 ### Changed
