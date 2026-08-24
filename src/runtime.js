@@ -9,6 +9,7 @@ export const READ_PORT_TIMEOUT_MS = 5000;
 export const READ_PORT_POLL_MS = 100;
 export const RETRY_DELAY_MS = 15_000;
 
+/** @type {import("../tedi").ExtensionContext | null} */
 export let ctx = null;
 /** Background process handle returned by `shell_bg_spawn_direct`. */
 export let helperBgId = null;

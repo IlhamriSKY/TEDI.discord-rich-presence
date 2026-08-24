@@ -34,6 +34,7 @@ import { schedulePush, teardown } from "./presence.js";
 import { active, ctx, lastContext, setActive, setCtx, setLastContext } from "./runtime.js";
 import { showConnectingIcon } from "./statusbar.js";
 
+/** @param {import("../tedi").ExtensionContext} context */
 export async function activate(context) {
   setCtx(context);
   setActive(true);
