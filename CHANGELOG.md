@@ -2,6 +2,12 @@
 
 All notable changes to **TEDI Discord Rich Presence**. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow [SemVer](https://semver.org/).
 
+## [1.5.15] - 2026-10-09
+
+### Fixed
+
+- **A sidecar that cannot start no longer floods the window with the same error.** The presence scheduler retries every few seconds, and each failed start used to raise a new toast, so a missing binary or a blocked launch covered the corner of the window for as long as TEDI ran. Now a failure is shown once per streak and logged after that; the first start that succeeds resets it.
+
 ## [1.5.14] - 2026-08-24
 
 ### Changed

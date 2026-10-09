@@ -18,6 +18,24 @@ import {
 } from "./runtime.js";
 import { safeStatusBarRemove } from "./statusbar.js";
 
+/**
+ * The last failure shown as a toast. The presence scheduler retries every few
+ * seconds, so a sidecar that cannot start used to raise the same error toast
+ * over and over, covering the corner of the window for as long as TEDI ran.
+ * Now a failure is toasted once per streak and logged after that; the first
+ * spawn that announces its port resets the streak.
+ */
+let lastFailure = null;
+
+function failOnce(message, variant) {
+  if (message === lastFailure) {
+    ctx.logger.warn(message);
+    return;
+  }
+  lastFailure = message;
+  ctx.ui.toast(message, { variant });
+}
+
 export async function spawnHelper() {
   // Re-spawn if the previous handle's process has exited (idle timeout,
   // crash, etc.). Asks TEDI's shell-bg supervisor for the latest state.
@@ -44,9 +62,9 @@ export async function spawnHelper() {
   }
   const path = helperPathFor(ctx.installPath, ctx.os);
   if (!path) {
-    ctx.ui.toast(
+    failOnce(
       `Discord Rich Presence: no sidecar binary for ${ctx.os?.platform}/${ctx.os?.arch} in this release.`,
-      { variant: "warning" },
+      "warning",
     );
     return false;
   }
@@ -61,10 +79,7 @@ export async function spawnHelper() {
     }));
     ctx.logger.info("sidecar spawned", { handle: helperBgId, path });
   } catch (err) {
-    ctx.ui.toast(
-      `Discord Rich Presence: could not start the sidecar (${err}).`,
-      { variant: "error" },
-    );
+    failOnce(`Discord Rich Presence: could not start the sidecar (${err}).`, "error");
     ctx.logger.error("spawn failed", err);
     return false;
   }
@@ -87,6 +102,7 @@ export async function spawnHelper() {
       if (match) {
         setHelperPort(Number(match[1]));
         ctx.logger.info("sidecar port", helperPort);
+        lastFailure = null;
         return true;
       }
       if (logs && typeof logs === "object" && logs.exited) {
@@ -98,10 +114,7 @@ export async function spawnHelper() {
     }
     await sleep(READ_PORT_POLL_MS);
   }
-  ctx.ui.toast(
-    "Discord Rich Presence: sidecar did not announce a port within 5 s.",
-    { variant: "error" },
-  );
+  failOnce("Discord Rich Presence: sidecar did not announce a port within 5 s.", "error");
   await killHelper();
   return false;
 }
